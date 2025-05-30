@@ -1,0 +1,31 @@
+**Privacy Policy for Unsplash Instant Reborn Extension**
+
+This Privacy Policy describes how the "Unsplash Instant Reborn" Chrome Extension handles your information.
+
+**1. Data Collection & Storage**
+The Unsplash Instant Reborn extension is designed with your privacy in mind. It does not collect any Personally Identifiable Information (PII) from your Browse activity or your Google account.
+
+This extension stores the following information locally on your device:
+* **User Preferences:** Your Unsplash API Key and preferred Cache Duration are stored using Chrome's `chrome.storage.sync` API. This data is synced to your Google account across devices for convenience but is not transmitted to, or accessible by, the extension developer.
+* **Cached Photo Data:** The details of the last fetched Unsplash photo (including its ID, image URLs, photographer's name, profile image URLs, and relevant links) are stored in `chrome.storage.local` to optimize performance and reduce API requests. This data resides solely on your device and is not transmitted to the extension developer.
+
+**2. Use of Information**
+The information stored locally is used exclusively for the functionality of the "Unsplash Instant Reborn" extension:
+* Your Unsplash API Key is used solely to authenticate requests to the Unsplash API to fetch random background images.
+* The Cache Duration setting is used to determine how long to display the same image before fetching a new one.
+* The cached photo data is used to display the background image and its associated photographer information on your new tab page.
+
+**3. Third-Party Services**
+This extension communicates with the Unsplash API to fetch background images.
+* **Unsplash API:** When the extension makes requests to `https://api.unsplash.com/`, standard network request information (such as your IP address, browser user agent, etc.) may be transmitted to Unsplash. Please review Unsplash's own Privacy Policy for details on their data practices: [https://unsplash.com/privacy](https://unsplash.com/privacy)
+
+**4. Data Sharing**
+The Unsplash Instant Reborn extension does not share any user data collected or stored with any third parties, other than the necessary communication with the Unsplash API as described above for its core functionality.
+
+**5. Changes to This Privacy Policy**
+We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date. We encourage you to review this Privacy Policy periodically for any changes.
+
+**6. Contact Us**
+If you have any questions about this Privacy Policy, please contact us at [your_email@example.com] or [link_to_contact_form].
+
+**Last updated: May 30, 2025**

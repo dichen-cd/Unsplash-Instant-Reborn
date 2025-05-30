@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unsplash Instant Reborn Options</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+            padding: 20px;
+            width: 450px; /* Slightly wider to accommodate more text */
+            margin: auto;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .instruction-box {
+            background-color: #e0f2f7; /* Light blue background */
+            border: 1px solid #b3e5fc; /* Matching border */
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            color: #01579b; /* Darker blue text */
+        }
+        .instruction-box h2 {
+            margin-top: 0;
+            color: #01579b;
+            font-size: 1.2em;
+        }
+        .instruction-box ol {
+            padding-left: 20px;
+        }
+        .instruction-box a {
+            color: #01579b;
+            font-weight: bold;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"],
+        input[type="number"] {
+            width: calc(100% - 22px); /* Account for padding and border */
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box; /* Include padding and border in the element's total width and height */
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status-message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            display: none; /* Hidden by default */
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .warning-message {
+            background-color: #fff3cd; /* Light yellow */
+            border: 1px solid #ffeeba;
+            padding: 10px;
+            margin-top: 15px;
+            border-radius: 4px;
+            color: #856404; /* Dark yellow text */
+        }
+    </style>
+</head>
+<body>
+    <h1>Unsplash Instant Reborn Options</h1>
+
+    <div class="instruction-box">
+        <h2>How to get your Unsplash API Key:</h2>
+        <ol>
+            <li>Go to the <a href="https://unsplash.com/developers" target="_blank">Unsplash Developers website</a>.</li>
+            <li>Click "Join" or "Log in" to create an account or sign in.</li>
+            <li>Once logged in, click "Your apps" (or similar) and then "New Application".</li>
+            <li>Agree to the API Guidelines.</li>
+            <li>Give your application a name (e.g., "My Chrome New Tab Extension") and a description.</li>
+            <li>Once your application is created, you will see your **"Access Key"**. This is your API key!</li>
+            <li>Copy and paste the **Access Key** into the field below.</li>
+        </ol>
+    </div>
+
+    <div class="form-group">
+        <label for="unsplashApiKey">Unsplash API Key (Access Key):</label>
+        <input type="text" id="unsplashApiKey" placeholder="Paste your Unsplash Access Key here">
+    </div>
+
+    <div class="form-group">
+        <label for="cacheDuration">Cache Duration (minutes):</label>
+        <input type="number" id="cacheDuration" value="5" min="1" max="1440">
+        <small>How long (in minutes) to use the same background image before fetching a new one. (Min: 1, Max: 1440 mins)</small>
+    </div>
+
+    <button id="saveButton">Save Settings</button>
+
+    <div id="status-message"></div>
+
+    <div class="warning-message">
+        <strong>Important:</strong> After saving your settings, please reload your browser's new tab page or restart Chrome for the changes to take full effect.
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>
