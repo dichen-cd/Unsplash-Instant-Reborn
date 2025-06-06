@@ -1,6 +1,7 @@
 // background.js
 
 const CACHE_KEY = 'unsplashPhotoData';
+const DEFAULT_CACHE_DURATION_MINUTES = 5; // Default if user hasn't set one
 
 // Function to get current settings from storage or use defaults
 async function getSettings() {
@@ -8,13 +9,13 @@ async function getSettings() {
         chrome.storage.sync.get(
             {
                 unsplashApiKey: '', // Default empty
-                cacheDuration: 5    // Default 5 minutes
+                cacheDuration: DEFAULT_CACHE_DURATION_MINUTES // Default 5 minutes
             },
             (items) => {
                 resolve({
                     unsplashApiKey: items.unsplashApiKey,
-                    // Convert minutes to milliseconds for CACHE_DURATION
-                    cacheDurationMs: items.cacheDuration * 60 * 1000
+                    cacheDuration: items.cacheDuration, // Keep in minutes for alarm setup
+                    cacheDurationMs: items.cacheDuration * 60 * 1000 // Convert to milliseconds for time comparison
                 });
             }
         );
@@ -28,9 +29,6 @@ async function fetchAndCacheNewPhoto() {
 
     if (!UNSPLASH_API_KEY) {
         console.error("Unsplash API Key is not configured. Please set it in extension options.");
-        // Optionally, you might want to open the options page here too
-        // if a new tab is opened and the key is missing.
-        // chrome.runtime.openOptionsPage();
         return null; // Cannot fetch without API key
     }
 
@@ -40,11 +38,8 @@ async function fetchAndCacheNewPhoto() {
         console.log("Attempting to fetch a new photo from Unsplash...");
         const response = await fetch(UNSPLASH_API_URL);
         if (!response.ok) {
-            // Check for specific error status codes from Unsplash
             if (response.status === 401 || response.status === 403) {
                  console.error("Unsplash API Key invalid or insufficient permissions. Please check your key in extension options.");
-                 // Maybe open options page if API key is explicitly bad
-                 // chrome.runtime.openOptionsPage();
             }
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -74,9 +69,10 @@ async function fetchAndCacheNewPhoto() {
                 html: data.links.html,
                 download: data.links.download
             },
-            timestamp: Date.now() // Store the timestamp when this photo was fetched
+            timestamp: Date.now(), // Store the timestamp WHEN this photo was fetched
+            displayedOnce: false   // NEW: Flag to track if this photo has been displayed
         };
-        await chrome.storage.local.set({ [CACHE_KEY]: photoData });
+        await chrome.storage.local.set({ [CACHE_KEY]: photoData }); // Store in local storage
         console.log("Fetched and cached new photo from Unsplash:", photoData.id);
         return photoData;
     } catch (error) {
@@ -85,14 +81,90 @@ async function fetchAndCacheNewPhoto() {
     }
 }
 
+// Function to determine if a new image needs to be fetched
+async function needsNewPhoto(photoData, settings) {
+    if (!photoData) {
+        console.log("Needs new photo: No photo stored.");
+        return true; // No photo stored at all
+    }
+
+    // Check if the current photo is "stale" (older than configured cache duration)
+    const isStale = (Date.now() - photoData.timestamp) > settings.cacheDurationMs;
+
+    // Logic:
+    // If it's already displayed AND it's stale, we need a new one.
+    if (photoData.displayedOnce && isStale) {
+        console.log("Needs new photo: Photo was displayed and is now stale.");
+        return true;
+    }
+    // If it was displayed but is NOT stale, we don't need a new one.
+    if (photoData.displayedOnce && !isStale) {
+        console.log("No new photo needed: Photo was displayed but is still fresh.");
+        return false;
+    }
+    // If it was NOT displayed yet (displayedOnce is false), we don't need a new one.
+    if (!photoData.displayedOnce) {
+        console.log("No new photo needed: Photo is cached but not yet displayed.");
+        return false;
+    }
+
+    // Fallback, should not be reached with clear logic above
+    return false;
+}
+
+// Function to create or reschedule the alarm
+async function createOrRescheduleAlarm() {
+    const settings = await getSettings();
+    const CACHE_DURATION_MINUTES = settings.cacheDuration;
+
+    // Minimum periodInMinutes for alarms is 1 minute in Chrome, but we use the user's setting.
+    // If the user sets it too low (e.g., 0), we might default to 1 min or handle it.
+    // Let's ensure a minimum of 1 minute to avoid issues.
+    const alarmPeriod = Math.max(1, CACHE_DURATION_MINUTES);
+
+    chrome.alarms.clearAll(); // Clear any existing alarms
+    chrome.alarms.create('unsplash-refresh-alarm', {
+        periodInMinutes: alarmPeriod // Use user-configured duration
+        // We don't use 'when' here for periodic alarms, 'periodInMinutes' means start immediately and repeat.
+    });
+    console.log('Alarm set to refresh every ', alarmPeriod, ' minutes');
+}
+
 // --- Top-level execution and listener registration ---
 
 // Listener for when the extension is installed or updated
 chrome.runtime.onInstalled.addListener((details) => {
-    // Check if the reason is 'install' (first time installation)
     if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
         console.log("Extension installed for the first time. Opening options page.");
-        chrome.runtime.openOptionsPage(); // Open the options page
+        chrome.runtime.openOptionsPage();
+    }
+    // Create or reschedule the alarm on install/update
+    createOrRescheduleAlarm();
+});
+
+// Listener for when settings are changed by the user (to update alarm)
+chrome.storage.sync.onChanged.addListener((changes) => {
+    if (changes.cacheDuration) {
+        console.log("Cache duration setting changed. Rescheduling alarm.");
+        createOrRescheduleAlarm();
+    }
+});
+
+
+// Alarm listener (fires periodically)
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === 'unsplash-refresh-alarm') {
+        console.log('Alarm fired! Checking and potentially refreshing photo...');
+        const result = await chrome.storage.local.get(CACHE_KEY);
+        const photoData = result[CACHE_KEY];
+        const settings = await getSettings();
+
+        if (await needsNewPhoto(photoData, settings)) {
+            console.log("Alarm: Needs new photo, fetching...");
+            await fetchAndCacheNewPhoto();
+        } else {
+            console.log("Alarm: Cached photo does not need refresh (either new or not yet displayed).");
+        }
     }
 });
 
@@ -101,35 +173,39 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getUnsplashPhoto") {
         chrome.storage.local.get(CACHE_KEY, async (result) => {
-            const settings = await getSettings(); // Get current settings
-            const CACHE_DURATION_MS = settings.cacheDurationMs;
-
+            const settings = await getSettings();
             let photoData = result[CACHE_KEY];
-            // Fetch new if NO cached photo OR if cached photo is older than configured CACHE_DURATION
-            if (!photoData || (Date.now() - photoData.timestamp > CACHE_DURATION_MS)) {
-                console.log("Cached photo either old or not found, fetching new for new tab request...");
-                photoData = await fetchAndCacheNewPhoto(); // Await here to ensure data is fresh before sending
+
+            if (await needsNewPhoto(photoData, settings)) {
+                console.log("New Tab Request: Needs new photo, fetching...");
+                photoData = await fetchAndCacheNewPhoto();
             } else {
-                console.log("Serving existing cached photo (still fresh) for new tab request.");
+                console.log("New Tab Request: Serving existing cached photo.");
+            }
+
+            // Immediately mark the photo as displayed once it's sent to the new tab.
+            if (photoData) {
+                photoData.displayedOnce = true;
+                await chrome.storage.local.set({ [CACHE_KEY]: photoData });
+                console.log("New Tab Request: Photo marked as displayed.");
             }
             sendResponse({ photo: photoData });
         });
         return true; // Indicates an asynchronous response
     }
+    // No longer need a separate "markPhotoAsDisplayed" action as it's handled within getUnsplashPhoto
 });
 
-// Initial photo fetch on service worker startup (only if no photo is cached or if it's old based on settings)
+// Initial photo fetch on service worker startup (ensures first new tab loads quickly)
 (async () => {
     const result = await chrome.storage.local.get(CACHE_KEY);
     const photoData = result[CACHE_KEY];
-    const settings = await getSettings(); // Get current settings
-    const CACHE_DURATION_MS = settings.cacheDurationMs;
+    const settings = await getSettings();
 
-    // Fetch new if NO cached photo OR if cached photo is older than configured CACHE_DURATION
-    if (!photoData || (Date.now() - photoData.timestamp > CACHE_DURATION_MS)) {
-        console.log("Initial fetch of photo on service worker startup (cache empty or old based on settings).");
+    if (await needsNewPhoto(photoData, settings)) {
+        console.log("Startup: Needs new photo, fetching...");
         await fetchAndCacheNewPhoto();
     } else {
-        console.log("Initial photo found in cache and is still fresh on startup.");
+        console.log("Startup: Cached photo is fresh or not yet displayed.");
     }
 })();
