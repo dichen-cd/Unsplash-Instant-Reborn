@@ -18,7 +18,11 @@
 * **Configurable Cache Duration:** Set how long an image should be cached before a new one is fetched, helping to manage API requests.
 * **First-Time Setup Prompt:** Automatically opens the options page on first installation to guide you through API key configuration.
 
-## Installation (Developer Mode):
+## Installation
+
+[Chrome Web Store](https://chromewebstore.google.com/detail/unsplash-instant-reborn/nhielejgoepolmhbgbhfiijgniefalki)
+
+## Manual Install:
 
 To install this extension in Chrome:
 
