@@ -1,9 +1,17 @@
 body {
     margin: 0;
-    overflow: hidden; /* Prevent scrollbars */
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
-    color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh; /* Ensure body takes full viewport height */
+    background-color: #333; /* Fallback background */
+}
+
+/* New: Utility class for hiding elements, used by JS */
+.hidden {
+    display: none !important;
 }
 
 #photo-container {
@@ -22,21 +30,36 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover; /* Ensures the image covers the entire container */
+    object-fit: cover;
+    z-index: 1;
+    transition: opacity 0.5s ease-in-out, filter 0.5s ease-in-out; /* Combined transitions */
     filter: brightness(0.8); /* Slightly dim the image for better text readability */
-    transition: opacity 0.5s ease-in-out; /* Smooth transition for image loading */
 }
 
-/* Top Section Styling */
+#background-photo.loading {
+    filter: brightness(0.8) blur(20px); /* Apply blur and dimming when loading low-res or before high-res */
+}
+
+
+/* --- Top Section Styling --- */
 #top-section {
     position: absolute;
-    top: 20px; /* Increased padding from top */
-    left: 20px; /* Increased padding from left */
-    right: 20px; /* Increased padding from right */
+    top: 0; /* Reset to 0, use padding for spacing */
+    left: 0; /* Reset to 0, use padding for spacing */
+    width: 100%; /* Take full width */
+    padding: 20px; /* Consistent padding with bottom section */
+    box-sizing: border-box; /* Include padding in width */
     display: flex;
     justify-content: space-between;
     align-items: center;
     z-index: 20;
+    opacity: 0; /* Hidden by default, faded in by JS */
+    transition: opacity 0.5s ease-in-out;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.5); /* Shadow for readability on light photos */
+}
+
+#top-section.loaded {
+    opacity: 1;
 }
 
 #top-left-buttons, #top-right-buttons {
@@ -55,14 +78,14 @@ body {
 }
 
 .control-button {
-    background: rgba(0, 0, 0, 0.3);
+    background: rgba(0, 0, 0, 0.4); /* Slightly increased opacity for better visibility */
     color: #fff;
     border: none;
     padding: 8px 15px; /* Adjusted padding */
     border-radius: 5px;
     cursor: pointer;
-    opacity: 0.8;
-    transition: opacity 0.2s ease-in-out;
+    opacity: 0.9; /* Slightly higher base opacity for buttons */
+    transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out, transform 0.2s ease-in-out; /* Added background and transform transitions */
     display: flex; /* For icon and text alignment */
     align-items: center;
     text-decoration: none; /* Remove underline from <a> */
@@ -70,33 +93,46 @@ body {
 
 .control-button:hover {
     opacity: 1;
+    background-color: rgba(0, 0, 0, 0.6); /* Darker on hover */
+    transform: translateY(-2px); /* Slight lift effect */
 }
 
 .control-button svg {
     margin-right: 8px; /* Space between icon and text */
+    fill: #fff; /* Ensure SVG color is white */
 }
 
-/* Bottom Section Styling */
+/* --- Bottom Section Styling --- */
 #bottom-section {
     position: absolute;
-    bottom: 20px;
-    left: 20px;
-    right: 20px; /* To align items to the right if needed later */
+    bottom: 0; /* Reset to 0, use padding for spacing */
+    left: 0; /* Reset to 0, use padding for spacing */
+    width: 100%; /* Take full width */
+    padding: 20px; /* Consistent padding with top section */
+    box-sizing: border-box; /* Include padding in width */
     z-index: 10;
     display: flex;
-    justify-content: space-between; /* To push right items to the right, even if empty */
-    align-items: center;
+    justify-content: space-between; /* To push left and right items apart */
+    align-items: flex-end; /* Align content to the bottom */
+    color: #fff; /* Base color for text in this section */
+    opacity: 0; /* Hidden by default, faded in by JS */
+    transition: opacity 0.5s ease-in-out;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.5); /* Shadow for readability on light photos */
+}
+
+#bottom-section.loaded {
+    opacity: 1;
 }
 
 #bottom-left-info {
     display: flex;
-    align-items: center;
+    align-items: flex-end; /* Align avatar and text info to the bottom */
+    gap: 10px; /* Space between avatar and text */
 }
 
 #photographer-profile-link {
     display: block; /* Ensure the link acts as a block for correct avatar sizing */
     line-height: 0; /* Remove extra space below inline image */
-    margin-right: 10px;
     opacity: 0.9;
     transition: opacity 0.2s ease-in-out;
 }
@@ -140,4 +176,114 @@ body {
 #photographer-location-link:hover {
     color: rgba(255, 255, 255, 1); /* Full white on hover */
     text-decoration: underline;
+}
+
+/* --- NEW: EXIF Information Styling --- */
+#bottom-right-exif {
+    display: flex; /* Use flexbox to arrange EXIF items horizontally */
+    flex-direction: row; /* Arrange items in a row */
+    align-items: flex-end; /* Align to the bottom, consistent with left side */
+    gap: 15px; /* Space between each EXIF data point */
+    /* opacity and hidden class handled by JS for fade-in/out */
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+}
+
+#bottom-right-exif.loaded {
+    opacity: 1;
+}
+
+.exif-item {
+    color: rgba(255, 255, 255, 0.9); /* Slightly transparent white, like location text */
+    font-size: 0.9em; /* Consistent size, slightly smaller for details */
+    font-weight: normal; /* Less bold than name, more like location subtext */
+    white-space: nowrap; /* Prevent items from wrapping */
+}
+
+/* Optional: Separator between EXIF items for better visual distinction */
+.exif-item + .exif-item::before {
+    content: "• "; /* A simple dot separator */
+    margin-right: -10px; /* Adjust margin to pull dot closer to text if needed */
+    color: rgba(255, 255, 255, 0.5); /* Lighter separator */
+}
+
+
+/* --- Loading Overlay Styling (Adjusted) --- */
+/* Your original #initial-loading-overlay is now #loading-overlay */
+#loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9); /* Dark overlay */
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    z-index: 999; /* Below error overlay (1000), above everything else */
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 1.2em;
+    opacity: 1; /* Initially visible for dynamic content by JS */
+    transition: opacity 0.5s ease-in-out;
+    pointer-events: none; /* Allow clicks to pass through when hidden */
+}
+
+#loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none; /* Allow clicks to pass through when hidden */
+}
+
+/* The subtext for loading */
+#loading-sub-text {
+    font-size: 0.8em;
+    margin-top: 15px;
+    color: #bbb;
+}
+
+/* Optional: Simple CSS spinner */
+.spinner {
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top: 4px solid #fff;
+    width: 40px;
+    height: 40px;
+    -webkit-animation: spin 1s linear infinite; /* Safari */
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+@-webkit-keyframes spin {
+    0% { -webkit-transform: rotate(0deg); }
+    100% { -webkit-transform: rotate(360deg); }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Error Overlay (your existing error overlay styles, ensure z-index is higher) */
+#error-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    z-index: 1000; /* Ensure this is above loading overlay */
+    font-family: inherit;
+    padding: 20px;
+    box-sizing: border-box;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+    pointer-events: none;
 }

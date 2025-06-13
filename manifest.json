@@ -5,13 +5,19 @@
     "description": "A new tab extension displaying random Unsplash photos.",
     "permissions": [
         "storage",
-        "alarms"
+        "alarms",
+        "unlimitedStorage"
     ],
     "host_permissions": [
-        "https://api.unsplash.com/"
+        "https://api.unsplash.com/",
+        "https://images.unsplash.com/"
     ],
+    "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://api.unsplash.com https://images.unsplash.com https://*.unsplash.com; img-src 'self' data: https://images.unsplash.com https://*.unsplash.com;"
+    },
     "background": {
-        "service_worker": "background.js"
+        "service_worker": "background.js",
+        "type": "module"
     },
     "chrome_url_overrides": {
         "newtab": "newtab.html"

@@ -2,7 +2,7 @@
 
 **A reimplementation of "Unsplash Instant" with full Manifest V3 support.**
 
-**Note:** This extension has been primarily written and guided by an AI.
+**Note:** This extension was primarily developed with guidance from Gemini 2.5 Flash (as I have no experience with JavaScript, HTML, or CSS).
 
 
 "Unsplash Instant Reborn" is a Chrome New Tab extension that replaces your default new tab page with stunning, high-quality, random background photos from Unsplash. You can customize your experience by configuring your own Unsplash API key and setting the image caching duration directly within the extension's options.
