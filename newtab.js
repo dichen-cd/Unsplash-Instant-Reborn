@@ -13,17 +13,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const photographerLocationLink = document.getElementById('photographer-location-link');
     const photographerLocation = document.getElementById('photographer-location');
 
-    // References to section containers for hiding/showing during error and for fade-in
-    const photoContainer = document.getElementById('photo-container'); // Used for error display
+    // References to section containers
     const topSection = document.getElementById('top-section');
     const bottomSection = document.getElementById('bottom-section');
-
-    // NEW references for the loading overlay elements
     const loadingOverlay = document.getElementById('loading-overlay');
     const loadingMainText = document.getElementById('loading-main-text');
     const loadingSubText = document.getElementById('loading-sub-text');
-
-    // NEW references for EXIF elements
     const bottomRightExif = document.getElementById('bottom-right-exif');
     const exifCamera = document.getElementById('exif-camera');
     const exifShutter = document.getElementById('exif-shutter');
@@ -31,172 +26,164 @@ document.addEventListener('DOMContentLoaded', async () => {
     const exifIso = document.getElementById('exif-iso');
     const exifFocalLength = document.getElementById('exif-focal-length');
 
-
     // Store the currently active Blob URLs to revoke them when a new image loads
-    let currentHighResBlobUrl = null;
-    let currentLowResBlobUrl = null;
+    let currentHighResUrl = null;
+    let currentLowResUrl = null;
 
-    // Create a global error overlay element once (your existing code)
+    // Create a global error overlay element (code unchanged)
     const errorOverlay = document.createElement('div');
     errorOverlay.id = 'error-overlay';
-    errorOverlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.9);
-        color: #fff;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        text-align: center;
-        z-index: 1000;
-        font-family: inherit; /* Inherit font from body */
-        padding: 20px;
-        box-sizing: border-box;
-        opacity: 0; /* Hidden by default, will fade in */
-        transition: opacity 0.5s ease-in-out;
-        pointer-events: none; /* Allow clicks to pass through when hidden */
-    `;
-    errorOverlay.innerHTML = `
-        <p style="font-size: 1.5em; font-weight: bold; margin-bottom: 20px;">Oops! Something went wrong.</p>
-        <p style="font-size: 1.1em; line-height: 1.6;">Failed to load a new Unsplash photo.</p>
-        <p style="font-size: 1.1em; line-height: 1.6; margin-top: 10px;">Please ensure your Unsplash API Key is correctly set in your <a href="chrome://extensions/?id=${chrome.runtime.id}" target="_blank" style="color: #007bff; text-decoration: underline;">extension options</a>.</p>
-        <p style="font-size: 1.1em; line-height: 1.6; margin-top: 20px;">If the key is correct, try refreshing the page or check your internet connection.</p>
-    `;
+    errorOverlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; z-index: 1000; font-family: inherit; padding: 20px; box-sizing: border-box; opacity: 0; transition: opacity 0.5s ease-in-out; pointer-events: none;`;
+    errorOverlay.innerHTML = `<p style="font-size: 1.5em; font-weight: bold; margin-bottom: 20px;">Oops! Something went wrong.</p><p style="font-size: 1.1em; line-height: 1.6;">Failed to load a new Unsplash photo.</p><p style="font-size: 1.1em; line-height: 1.6; margin-top: 10px;">Please ensure your Unsplash API Key is correctly set in your <a href="chrome://extensions/?id=${chrome.runtime.id}" target="_blank" style="color: #007bff; text-decoration: underline;">extension options</a>.</p><p style="font-size: 1.1em; line-height: 1.6; margin-top: 20px;">If the key is correct, try refreshing the page or check your internet connection.</p>`;
     document.body.appendChild(errorOverlay);
 
-    // Function to show the loading overlay
+    // --- All functions for showing/hiding overlays remain the same ---
     function showLoadingOverlay(mainText, subText = '') {
         if (loadingOverlay) {
             loadingMainText.textContent = mainText;
             loadingSubText.textContent = subText;
-            loadingOverlay.classList.remove('hidden'); // Make it visible
+            loadingOverlay.classList.remove('hidden');
             loadingOverlay.style.opacity = '1';
         }
     }
 
-    // Function to hide the loading overlay
     function hideLoadingOverlay() {
         if (loadingOverlay) {
             loadingOverlay.style.opacity = '0';
             setTimeout(() => {
-                loadingOverlay.classList.add('hidden'); // Hide after transition
-            }, 500); // Matches CSS transition duration
+                loadingOverlay.classList.add('hidden');
+            }, 500);
         }
     }
 
-
-    // Function to show the error overlay
     function showGlobalError(message = "Failed to load photo.") {
-        // Hide loading overlay if it's still visible
         hideLoadingOverlay();
-
-        if (backgroundPhoto) backgroundPhoto.style.opacity = '0'; // Fade out current photo
-        if (topSection) topSection.classList.remove('loaded'); // Hide UI elements
+        if (backgroundPhoto) backgroundPhoto.style.opacity = '0';
+        if (topSection) topSection.classList.remove('loaded');
         if (bottomSection) bottomSection.classList.remove('loaded');
-
         if (errorOverlay) {
-            errorOverlay.querySelector('p:first-child').textContent = message;
-            errorOverlay.style.display = 'flex'; // Make it visible
+            errorOverlay.querySelector('p:nth-child(2)').textContent = message;
+            errorOverlay.style.display = 'flex';
             errorOverlay.style.opacity = '1';
-            errorOverlay.style.pointerEvents = 'auto'; // Enable clicks on links within
+            errorOverlay.style.pointerEvents = 'auto';
         }
     }
 
-    // Function to hide the error overlay
     function hideGlobalError() {
         if (errorOverlay) {
             errorOverlay.style.opacity = '0';
             errorOverlay.style.pointerEvents = 'none';
-            // Using a timeout to truly hide after transition completes
             setTimeout(() => {
                 errorOverlay.style.display = 'none';
-            }, 500); // Matches CSS transition duration
+            }, 500);
         }
     }
 
-    // Helper function to create a Blob URL from an ArrayBuffer
+    // FIXED: Updated helper function to use correct MIME type
     function createBlobUrlFromArrayBuffer(arrayBuffer, mimeType = 'image/webp') {
-        if (!arrayBuffer) return null;
-        const blob = new Blob([arrayBuffer], { type: mimeType });
-        return URL.createObjectURL(blob);
+        if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+            console.error("ArrayBuffer is empty or null");
+            return null;
+        }
+        try {
+            const blob = new Blob([arrayBuffer], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            console.log(`Created blob URL with MIME type: ${mimeType}, size: ${arrayBuffer.byteLength} bytes`);
+            return url;
+        } catch (e) {
+            console.error("Error creating Blob URL from ArrayBuffer:", e);
+            return null;
+        }
     }
 
-    // Helper function to reconstruct WebP URL for srcset (since Blob URLs aren't suitable for srcset)
-    // This is primarily for the browser's internal resolution picking based on original URLs
+    // Helper for srcset remains the same
     function getWebpUrl(originalUrl) {
         if (!originalUrl) return '';
         return `${originalUrl}&fm=webp`;
     }
 
-    // Function to display the photo and attribution data
-    // This now expects the full cached data object from background.js
+    // FIXED: Updated displayPhoto to use MIME types from response
     function displayPhoto(cachedPhotoData) {
-        hideLoadingOverlay(); // Hide loading overlay when photo is ready to display
-        hideGlobalError(); // Also hide any active error state
+        hideLoadingOverlay();
+        hideGlobalError();
 
         const photo = cachedPhotoData.photo;
-        const highResArrayBuffer = cachedPhotoData.highResArrayBuffer; // Now an ArrayBuffer
-        const lowResArrayBuffer = cachedPhotoData.lowResArrayBuffer;   // Now an ArrayBuffer
+        const highResArrayBuffer = cachedPhotoData.highResArrayBuffer;
+        const lowResArrayBuffer = cachedPhotoData.lowResArrayBuffer;
+        const highResMimeType = cachedPhotoData.highResMimeType || 'image/webp';
+        const lowResMimeType = cachedPhotoData.lowResMimeType || 'image/webp';
+
+        console.log("Received photo data with MIME types:", { highResMimeType, lowResMimeType });
 
         if (!photo || (!highResArrayBuffer && !lowResArrayBuffer)) {
-            console.error("Invalid photo data or missing image data ArrayBuffers received:", cachedPhotoData);
+            console.error("Invalid photo data or missing image ArrayBuffers received:", cachedPhotoData);
             showGlobalError("Error: Image data not found or invalid.");
             return;
         }
 
-        // Revoke previously created Blob URLs to prevent memory leaks
-        if (currentHighResBlobUrl) {
-            URL.revokeObjectURL(currentHighResBlobUrl);
-            currentHighResBlobUrl = null;
+        // Revoke previous blob URLs
+        if (currentHighResUrl) {
+            URL.revokeObjectURL(currentHighResUrl);
+            currentHighResUrl = null;
         }
-        if (currentLowResBlobUrl) {
-            URL.revokeObjectURL(currentLowResBlobUrl);
-            currentLowResBlobUrl = null;
+        if (currentLowResUrl) {
+            URL.revokeObjectURL(currentLowResUrl);
+            currentLowResUrl = null;
         }
 
-        // --- Photo itself ---
         if (backgroundPhoto) {
-            // Create Blob URLs from the received ArrayBuffers
-            const tempLowResBlobUrl = createBlobUrlFromArrayBuffer(lowResArrayBuffer);
-            const tempHighResBlobUrl = createBlobUrlFromArrayBuffer(highResArrayBuffer);
+            // Create blob URLs with correct MIME types
+            const tempLowResUrl = lowResArrayBuffer ? createBlobUrlFromArrayBuffer(lowResArrayBuffer, lowResMimeType) : null;
+            const tempHighResUrl = highResArrayBuffer ? createBlobUrlFromArrayBuffer(highResArrayBuffer, highResMimeType) : null;
 
-            if (tempLowResBlobUrl) {
-                backgroundPhoto.src = tempLowResBlobUrl;
-                backgroundPhoto.classList.add('loading'); // Add class for blur
+            if (tempLowResUrl) {
+                backgroundPhoto.src = tempLowResUrl;
+                backgroundPhoto.classList.add('loading');
                 backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-                currentLowResBlobUrl = tempLowResBlobUrl; // Store for revocation
+                currentLowResUrl = tempLowResUrl;
 
-                // After a tiny delay (to allow low-res to render), swap to high-res
-                if (tempHighResBlobUrl) {
-                    setTimeout(() => {
-                        backgroundPhoto.src = tempHighResBlobUrl;
-                        backgroundPhoto.classList.remove('loading'); // Remove blur
-                        currentHighResBlobUrl = tempHighResBlobUrl; // Store for revocation
-                    }, 100); // A small delay (e.g., 100ms) for perceived progressive load
+                if (tempHighResUrl) {
+                    backgroundPhoto.src = tempHighResUrl;
+                    backgroundPhoto.classList.remove('loading');
+                    currentHighResUrl = tempHighResUrl;
+                    // Revoke low-res URL after high-res is loaded
+                    if (currentLowResUrl) {
+                        URL.revokeObjectURL(currentLowResUrl);
+                        currentLowResUrl = null;
+                    }
+                    console.log("High-res image loaded successfully");
+
+                //     const highResImg = new Image();
+                //     highResImg.onload = () => {
+                //         console.log("High-res image loaded successfully");
+                //         backgroundPhoto.src = tempHighResUrl;
+                //         backgroundPhoto.classList.remove('loading');
+                //         currentHighResUrl = tempHighResUrl;
+                //         // Revoke low-res URL after high-res is loaded
+                //         if (currentLowResUrl && currentLowResUrl !== tempHighResUrl) {
+                //             URL.revokeObjectURL(currentLowResUrl);
+                //             currentLowResUrl = null;
+                //         }
+                //     };
+                //     highResImg.onerror = (e) => {
+                //         console.error("Failed to load high-res image:", e);
+                //         backgroundPhoto.classList.remove('loading');
+                //     };
+                //     highResImg.src = tempHighResUrl;
                 } else {
-                    // If only low-res is available (e.g., high-res fetch failed)
-                    backgroundPhoto.classList.remove('loading'); // Still unblur the low-res
+                    backgroundPhoto.classList.remove('loading');
                 }
-            } else if (tempHighResBlobUrl) {
-                // Fallback: if somehow only high-res ArrayBuffer is available, use it directly
-                backgroundPhoto.src = tempHighResBlobUrl;
+            } else if (tempHighResUrl) {
+                backgroundPhoto.src = tempHighResUrl;
                 backgroundPhoto.classList.remove('loading');
                 backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-                currentHighResBlobUrl = tempHighResBlobUrl; // Store for revocation
+                currentHighResUrl = tempHighResUrl;
             } else {
-                // Should not happen if previous checks pass, but for safety
                 console.warn("No image ArrayBuffers found to display.");
                 showGlobalError("Failed to display image from cache.");
                 return;
             }
 
-            // Build srcset using the *original* WebP URLs from Unsplash (not Blob URLs).
-            // This is mostly for completeness or if browser heuristics ever try to use it,
-            // though with src already set from Blob, it's less critical for performance.
             let srcset = '';
             if (photo.urls.raw) srcset += `${getWebpUrl(photo.urls.raw)} ${photo.width || 2000}w, `;
             if (photo.urls.full) srcset += `${getWebpUrl(photo.urls.full)} 1920w, `;
@@ -204,56 +191,47 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (photo.urls.small) srcset += `${getWebpUrl(photo.urls.small)} 400w`;
             backgroundPhoto.srcset = srcset.trim().endsWith(',') ? srcset.trim().slice(0, -1) : srcset.trim();
 
-            // Fade in UI elements after image is set (even if blurred initially)
             if (topSection) topSection.classList.add('loaded');
             if (bottomSection) bottomSection.classList.add('loaded');
         }
 
-        // --- Other UI Elements (set these regardless of image load phase) ---
+        // --- All other UI element updates remain the same ---
         const userProfileUrl = `${photo.user.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
         const photoPageUrl = `${photo.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
         const downloadPhotoUrl = `${photo.links.download}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
 
-
         if (unsplashLogoLink) unsplashLogoLink.href = photoPageUrl;
         if (downloadLink) downloadLink.href = downloadPhotoUrl;
-
         if (photographerProfileLink) photographerProfileLink.href = userProfileUrl;
         if (photographerAvatar) {
             photographerAvatar.src = photo.user.profile_image.medium;
             photographerAvatar.alt = photo.user.name || 'Photographer Avatar';
         }
         if (photographerNameLink) {
-                photographerNameLink.href = userProfileUrl;
+            photographerNameLink.href = userProfileUrl;
             if (photographerName) photographerName.textContent = photo.user.name || 'Unknown Photographer';
         }
-
         if (photographerLocationLink && photographerLocation) {
             if (photo.user.location) {
                 photographerLocation.textContent = photo.user.location;
-                photographerLocationLink.href = userProfileUrl; // Link to photographer's profile for location
-                photographerLocationLink.style.display = 'block'; // Show element
+                photographerLocationLink.href = userProfileUrl;
+                photographerLocationLink.style.display = 'block';
             } else {
-                photographerLocationLink.style.display = 'none'; // Hide element if no location
+                photographerLocationLink.style.display = 'none';
             }
         }
 
-        // --- Display EXIF information ---
         const exif = photo.exif;
         let hasExifData = false;
+        if (exifCamera) exifCamera.textContent = '';
+        if (exifShutter) exifShutter.textContent = '';
+        if (exifAperture) exifAperture.textContent = '';
+        if (exifIso) exifIso.textContent = '';
+        if (exifFocalLength) exifFocalLength.textContent = '';
 
-        // Clear previous values
-        exifCamera.textContent = '';
-        exifShutter.textContent = '';
-        exifAperture.textContent = '';
-        exifIso.textContent = '';
-        exifFocalLength.textContent = '';
-        
         if (exif) {
             if (exif.make || exif.model) {
-                const cameraMake = exif.make || '';
-                const cameraModel = exif.model || '';
-                exifCamera.textContent = `${cameraMake} ${cameraModel}`.trim();
+                exifCamera.textContent = `${exif.make || ''} ${exif.model || ''}`.trim();
                 hasExifData = true;
             }
             if (exif.exposure_time) {
@@ -275,77 +253,56 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (bottomRightExif) {
-            if (hasExifData) {
-                bottomRightExif.classList.remove('hidden');
-                bottomRightExif.classList.add('loaded'); // For fade-in if you add CSS for .loaded
-            } else {
-                bottomRightExif.classList.add('hidden');
-                bottomRightExif.classList.remove('loaded');
-            }
+            bottomRightExif.classList.toggle('hidden', !hasExifData);
+            bottomRightExif.classList.toggle('loaded', hasExifData);
         }
     }
 
-    // NEW: Function to fetch photo with retry logic
-    async function fetchPhotoWithRetry(retries = 3, initialDelay = 500) { // Try up to 3 times, with 0.5s delay
+    // Updated fetch logic to log more information about the response
+    async function fetchPhotoWithRetry(retries = 3, initialDelay = 500) {
         for (let i = 0; i < retries; i++) {
             try {
-                // Show a generic loading message initially or indicate retry
                 if (i === 0) {
                     showLoadingOverlay('Loading photo...');
                 } else {
-                    showLoadingOverlay(`Retrying to load photo (${i+1}/${retries})...`, 'The background service might be waking up.');
+                    showLoadingOverlay(`Retrying to load photo (${i + 1}/${retries})...`, 'The background service might be waking up.');
                 }
-
-                // Wait a short delay before sending the message on retries
                 if (i > 0) {
-                    await new Promise(resolve => setTimeout(resolve, initialDelay * i)); // Exponential backoff for delay
+                    await new Promise(resolve => setTimeout(resolve, initialDelay * i));
                 }
 
                 const response = await chrome.runtime.sendMessage({ action: "getUnsplashPhoto" });
-                
-                if (response && (response.photo || response.error)) {
-                    // Update loading message if it's the first network fetch (not from cache)
-                    if (response.isInitialNetworkFetch) {
-                        showLoadingOverlay(
-                            'Downloading fresh image...',
-                            'If this takes a while, please check your API key in extension options.'
-                        );
-                        // The loading overlay will be hidden by displayPhoto() or showGlobalError()
-                    } else {
-                        // Image came from cache, hide loading message immediately as it's fast
-                        hideLoadingOverlay();
-                    }
 
-                    if (response.photo && (response.highResArrayBuffer || response.lowResArrayBuffer)) {
-                        displayPhoto(response); // Pass the entire response object (which is cachedPhotoData)
-                        return; // Success, exit the retry loop
-                    } else if (response.error) {
-                        showGlobalError(response.error);
-                        return; // An error was explicitly returned, show it and stop retrying
-                    } else {
-                        // This case should ideally not happen if response.error isn't set,
-                        // but indicates an incomplete or unexpected successful response.
-                        console.error("Received incomplete or unexpected photo data from background script, attempting retry:", response);
-                        throw new Error("Incomplete data received."); // Trigger a retry
-                    }
-                } else {
-                    // This 'else' block means 'response' was null or undefined,
-                    // which can happen if the background script is still initializing
-                    // or if there's a deeper communication issue.
-                    console.warn("No response or invalid structure from background script, attempting retry:", response);
-                    throw new Error("No response from background script."); // Trigger a retry
+                console.log("Received response from background:", {
+                    hasPhoto: !!response?.photo,
+                    hasHighRes: !!response?.highResArrayBuffer,
+                    highResSize: response?.highResArrayBuffer?.byteLength || 0,
+                    hasLowRes: !!response?.lowResArrayBuffer,
+                    lowResSize: response?.lowResArrayBuffer?.byteLength || 0,
+                    highResMimeType: response?.highResMimeType,
+                    lowResMimeType: response?.lowResMimeType
+                });
+
+                if (response && response.photo && (response.highResArrayBuffer || response.lowResArrayBuffer)) {
+                    displayPhoto(response);
+                    return;
                 }
+
+                if (response && response.error) {
+                    showGlobalError(response.error);
+                    return;
+                }
+
+                throw new Error("Invalid or empty response from background script.");
+
             } catch (error) {
-                console.warn(`Attempt ${i + 1} failed to communicate with background script:`, error);
+                console.warn(`Attempt ${i + 1} failed:`, error.message);
                 if (i === retries - 1) {
-                    // Last retry failed, show a final error message
-                    showGlobalError("Could not retrieve photo data. The extension's background service might be unresponsive. Try refreshing manually if the problem persists.");
+                    showGlobalError("Could not connect to the extension's background service. Please try refreshing the page.");
                 }
-                // If not the last retry, the loop will continue after the delay
             }
         }
     }
 
-    // Initiate the photo fetch process with retries when the DOM is loaded
     fetchPhotoWithRetry();
 });
