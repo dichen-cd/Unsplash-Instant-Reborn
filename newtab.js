@@ -3,6 +3,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
     // Get references to all HTML elements
     const backgroundPhoto = document.getElementById('background-photo');
+    // ADDED: Get a reference to the new anchor tag
+    const photoAnchor = document.getElementById('photo-anchor');
     const unsplashLogoLink = document.getElementById('unsplash-logo-link');
     const downloadLink = document.getElementById('download-link');
 
@@ -102,7 +104,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         return `${originalUrl}&fm=webp`;
     }
 
-    // FIXED: Updated displayPhoto to use MIME types from response
+    // ====================================================================
+    // MODIFIED: displayPhoto function simplified for progressive-image.js
+    // ====================================================================
     function displayPhoto(cachedPhotoData) {
         hideLoadingOverlay();
         hideGlobalError();
@@ -121,68 +125,35 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Revoke previous blob URLs
-        if (currentHighResUrl) {
-            URL.revokeObjectURL(currentHighResUrl);
-            currentHighResUrl = null;
-        }
-        if (currentLowResUrl) {
-            URL.revokeObjectURL(currentLowResUrl);
-            currentLowResUrl = null;
-        }
+        // Revoke previous blob URLs to prevent memory leaks
+        if (currentHighResUrl) URL.revokeObjectURL(currentHighResUrl);
+        if (currentLowResUrl) URL.revokeObjectURL(currentLowResUrl);
 
-        if (backgroundPhoto) {
-            // Create blob URLs with correct MIME types
+        if (photoAnchor && backgroundPhoto) {
+            // Create new blob URLs from the array buffers
             const tempLowResUrl = lowResArrayBuffer ? createBlobUrlFromArrayBuffer(lowResArrayBuffer, lowResMimeType) : null;
             const tempHighResUrl = highResArrayBuffer ? createBlobUrlFromArrayBuffer(highResArrayBuffer, highResMimeType) : null;
 
-            if (tempLowResUrl) {
-                backgroundPhoto.src = tempLowResUrl;
-                backgroundPhoto.classList.add('loading');
-                backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-                currentLowResUrl = tempLowResUrl;
-
-                if (tempHighResUrl) {
-                    backgroundPhoto.src = tempHighResUrl;
-                    backgroundPhoto.classList.remove('loading');
-                    currentHighResUrl = tempHighResUrl;
-                    // Revoke low-res URL after high-res is loaded
-                    if (currentLowResUrl) {
-                        URL.revokeObjectURL(currentLowResUrl);
-                        currentLowResUrl = null;
-                    }
-                    console.log("High-res image loaded successfully");
-
-                //     const highResImg = new Image();
-                //     highResImg.onload = () => {
-                //         console.log("High-res image loaded successfully");
-                //         backgroundPhoto.src = tempHighResUrl;
-                //         backgroundPhoto.classList.remove('loading');
-                //         currentHighResUrl = tempHighResUrl;
-                //         // Revoke low-res URL after high-res is loaded
-                //         if (currentLowResUrl && currentLowResUrl !== tempHighResUrl) {
-                //             URL.revokeObjectURL(currentLowResUrl);
-                //             currentLowResUrl = null;
-                //         }
-                //     };
-                //     highResImg.onerror = (e) => {
-                //         console.error("Failed to load high-res image:", e);
-                //         backgroundPhoto.classList.remove('loading');
-                //     };
-                //     highResImg.src = tempHighResUrl;
-                } else {
-                    backgroundPhoto.classList.remove('loading');
-                }
-            } else if (tempHighResUrl) {
-                backgroundPhoto.src = tempHighResUrl;
-                backgroundPhoto.classList.remove('loading');
-                backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-                currentHighResUrl = tempHighResUrl;
-            } else {
-                console.warn("No image ArrayBuffers found to display.");
-                showGlobalError("Failed to display image from cache.");
+            // Ensure we have URLs to work with
+            if (!tempLowResUrl && !tempHighResUrl) {
+                showGlobalError("Failed to create image URLs from data.");
                 return;
             }
+            
+            // The library uses the anchor's href for the high-res image
+            // and the image's src for the low-res preview.
+            // Fallback to whichever is available if one is missing.
+            photoAnchor.href = tempHighResUrl || tempLowResUrl;
+            backgroundPhoto.src = tempLowResUrl || tempHighResUrl;
+
+            // Store the new blob URLs so they can be revoked on the next load
+            currentLowResUrl = tempLowResUrl;
+            currentHighResUrl = tempHighResUrl;
+
+            // The library will now handle the progressive loading.
+            // We can continue to set other attributes as before.
+
+            backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
 
             let srcset = '';
             if (photo.urls.raw) srcset += `${getWebpUrl(photo.urls.raw)} ${photo.width || 2000}w, `;
@@ -305,4 +276,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     fetchPhotoWithRetry();
+
 });
