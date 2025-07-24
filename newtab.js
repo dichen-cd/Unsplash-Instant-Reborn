@@ -3,7 +3,6 @@
 document.addEventListener('DOMContentLoaded', async () => {
     // Get references to all HTML elements
     const backgroundPhoto = document.getElementById('background-photo');
-    // ADDED: Get a reference to the new anchor tag
     const photoAnchor = document.getElementById('photo-anchor');
     const unsplashLogoLink = document.getElementById('unsplash-logo-link');
     const downloadLink = document.getElementById('download-link');
@@ -28,9 +27,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const exifIso = document.getElementById('exif-iso');
     const exifFocalLength = document.getElementById('exif-focal-length');
 
-    // Store the currently active Blob URLs to revoke them when a new image loads
-    let currentHighResUrl = null;
-    let currentLowResUrl = null;
+    // --- REMOVED: Blob URL management is no longer needed ---
+    // let currentHighResUrl = null;
+    // let currentLowResUrl = null;
 
     // Create a global error overlay element (code unchanged)
     const errorOverlay = document.createElement('div');
@@ -81,22 +80,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // FIXED: Updated helper function to use correct MIME type
-    function createBlobUrlFromArrayBuffer(arrayBuffer, mimeType = 'image/webp') {
-        if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-            console.error("ArrayBuffer is empty or null");
-            return null;
-        }
-        try {
-            const blob = new Blob([arrayBuffer], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            console.log(`Created blob URL with MIME type: ${mimeType}, size: ${arrayBuffer.byteLength} bytes`);
-            return url;
-        } catch (e) {
-            console.error("Error creating Blob URL from ArrayBuffer:", e);
-            return null;
-        }
-    }
+    // --- REMOVED: createBlobUrlFromArrayBuffer is no longer needed ---
 
     // Helper for srcset remains the same
     function getWebpUrl(originalUrl) {
@@ -105,62 +89,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ====================================================================
-    // MODIFIED: displayPhoto function simplified for progressive-image.js
+    // REWRITTEN: displayPhoto function now uses URLs directly
     // ====================================================================
     function displayPhoto(cachedPhotoData) {
         hideLoadingOverlay();
         hideGlobalError();
 
-        const photo = cachedPhotoData.photo;
-        const highResArrayBuffer = cachedPhotoData.highResArrayBuffer;
-        const lowResArrayBuffer = cachedPhotoData.lowResArrayBuffer;
-        const highResMimeType = cachedPhotoData.highResMimeType || 'image/webp';
-        const lowResMimeType = cachedPhotoData.lowResMimeType || 'image/webp';
+        const { photo, highResUrl, lowResUrl } = cachedPhotoData;
 
-        console.log("Received photo data with MIME types:", { highResMimeType, lowResMimeType });
+        console.log("Received photo metadata with URLs:", { highResUrl, lowResUrl });
 
-        if (!photo || (!highResArrayBuffer && !lowResArrayBuffer)) {
-            console.error("Invalid photo data or missing image ArrayBuffers received:", cachedPhotoData);
+        if (!photo || (!highResUrl && !lowResUrl)) {
+            console.error("Invalid photo data or missing image URLs received:", cachedPhotoData);
             showGlobalError("Error: Image data not found or invalid.");
             return;
         }
 
-        // Revoke previous blob URLs to prevent memory leaks
-        if (currentHighResUrl) URL.revokeObjectURL(currentHighResUrl);
-        if (currentLowResUrl) URL.revokeObjectURL(currentLowResUrl);
-
         if (photoAnchor && backgroundPhoto) {
-            // Create new blob URLs from the array buffers
-            const tempLowResUrl = lowResArrayBuffer ? createBlobUrlFromArrayBuffer(lowResArrayBuffer, lowResMimeType) : null;
-            const tempHighResUrl = highResArrayBuffer ? createBlobUrlFromArrayBuffer(highResArrayBuffer, highResMimeType) : null;
-
-            // Ensure we have URLs to work with
-            if (!tempLowResUrl && !tempHighResUrl) {
-                showGlobalError("Failed to create image URLs from data.");
-                return;
-            }
-            
             // The library uses the anchor's href for the high-res image
             // and the image's src for the low-res preview.
-            // Fallback to whichever is available if one is missing.
-            photoAnchor.href = tempHighResUrl || tempLowResUrl;
-            backgroundPhoto.src = tempLowResUrl || tempHighResUrl;
-
-            // Store the new blob URLs so they can be revoked on the next load
-            currentLowResUrl = tempLowResUrl;
-            currentHighResUrl = tempHighResUrl;
+            // The browser will serve these from its HTTP cache if they were pre-loaded.
+            backgroundPhoto.src = lowResUrl || highResUrl;
+            photoAnchor.href = highResUrl || lowResUrl;
 
             // The library will now handle the progressive loading.
             // We can continue to set other attributes as before.
 
             backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-
-            let srcset = '';
-            if (photo.urls.raw) srcset += `${getWebpUrl(photo.urls.raw)} ${photo.width || 2000}w, `;
-            if (photo.urls.full) srcset += `${getWebpUrl(photo.urls.full)} 1920w, `;
-            if (photo.urls.regular) srcset += `${getWebpUrl(photo.urls.regular)} 1080w, `;
-            if (photo.urls.small) srcset += `${getWebpUrl(photo.urls.small)} 400w`;
-            backgroundPhoto.srcset = srcset.trim().endsWith(',') ? srcset.trim().slice(0, -1) : srcset.trim();
 
             if (topSection) topSection.classList.add('loaded');
             if (bottomSection) bottomSection.classList.add('loaded');
@@ -229,7 +184,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Updated fetch logic to log more information about the response
+    // REWRITTEN: fetch logic now expects metadata with URLs
     async function fetchPhotoWithRetry(retries = 3, initialDelay = 500) {
         for (let i = 0; i < retries; i++) {
             try {
@@ -246,15 +201,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 console.log("Received response from background:", {
                     hasPhoto: !!response?.photo,
-                    hasHighRes: !!response?.highResArrayBuffer,
-                    highResSize: response?.highResArrayBuffer?.byteLength || 0,
-                    hasLowRes: !!response?.lowResArrayBuffer,
-                    lowResSize: response?.lowResArrayBuffer?.byteLength || 0,
-                    highResMimeType: response?.highResMimeType,
-                    lowResMimeType: response?.lowResMimeType
+                    hasHighResUrl: !!response?.highResUrl,
+                    hasLowResUrl: !!response?.lowResUrl,
                 });
 
-                if (response && response.photo && (response.highResArrayBuffer || response.lowResArrayBuffer)) {
+                if (response && response.photo && (response.highResUrl || response.lowResUrl)) {
                     displayPhoto(response);
                     return;
                 }

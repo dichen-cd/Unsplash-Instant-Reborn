@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Unsplash Instant Reborn",
-    "version": "1.3",
+    "version": "1.4",
     "description": "A new tab extension displaying random Unsplash photos.",
     "permissions": [
         "storage",

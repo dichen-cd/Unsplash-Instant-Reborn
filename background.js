@@ -1,48 +1,29 @@
 // background.js
 
-// --- New: Cache Name ---
-const IMAGE_CACHE_NAME = 'unsplash-image-cache-v1';
+// --- REMOVED: Cache Name is no longer needed ---
+// const IMAGE_CACHE_NAME = 'unsplash-image-cache-v1';
 
 // --- New: Flag to prevent duplicate photo fetch processes ---
 let isFetchingPhoto = false;
 
-async function fetchWithRetry(url, retries = 10, delay = 1000) {
+// --- New: Helper function for fetch with retry on network errors ---
+async function fetchWithRetry(url, options, retries = 3, retryDelay = 1000) {
+    let lastError;
     for (let i = 0; i < retries; i++) {
         try {
-            // We use 'no-cache' to ensure we get a fresh response from the network
-            // before we decide to put it into our own Cache API.
-            const response = await fetch(url, { cache: 'no-cache' });
-
-            if (response.ok) {
-                return response;
-            } else {
-                if (response.status >= 500 || response.status === 408) {
-                    console.warn(`Fetch attempt ${i + 1} for ${url} failed with status ${response.status}. Retrying...`);
-                    if (i < retries - 1) {
-                        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
-                        continue;
-                    } else {
-                        console.error(`Final fetch attempt for ${url} failed with status ${response.status}.`);
-                        return null;
-                    }
-                } else {
-                    console.error(`Fetch for ${url} failed permanently with status ${response.status}. Not retrying.`);
-                    return null;
-                }
-            }
+            const response = await fetch(url, options);
+            return response; // Success (even with HTTP error), return response
         } catch (error) {
-            console.warn(`Network error during fetch attempt ${i + 1} for ${url}:`, error.message);
+            lastError = error;
+            console.warn(`Fetch attempt ${i + 1} of ${retries} for "${url}" failed: ${error.message}`);
             if (i < retries - 1) {
-                await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
-            } else {
-                console.error(`Final fetch attempt for ${url} failed due to network error:`, error.message);
-                return null;
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
     }
-    return null;
+    console.error(`All ${retries} fetch attempts for "${url}" failed.`);
+    throw lastError; // All retries failed, throw the last captured error.
 }
-
 
 // Global in-memory cache for the last fetched photo data
 let currentCachedPhotoMetadata = {
@@ -61,19 +42,11 @@ function getWebpUrl(originalUrl) {
     return `${originalUrl}&fm=webp`;
 }
 
-// --- REMOVED: arrayBufferToBase64 and base64ToArrayBuffer functions are no longer needed. ---
-
-
-// --- MODIFIED: Function to save photo data (metadata to storage, images to Cache API) ---
+// --- MODIFIED: Function to save photo data (metadata only) ---
 async function savePhotoData() {
     try {
         // Save metadata to chrome.storage.local
-        const dataToSave = { ...currentCachedPhotoMetadata };
-        // We don't need to save the actual image data in this object anymore.
-        delete dataToSave.highResArrayBuffer;
-        delete dataToSave.lowResArrayBuffer;
-
-        await chrome.storage.local.set({ 'cachedUnsplashPhoto': dataToSave });
+        await chrome.storage.local.set({ 'cachedUnsplashPhoto': currentCachedPhotoMetadata });
         console.log("Photo metadata saved to local storage with is_used:", currentCachedPhotoMetadata.is_used, "and time:", currentCachedPhotoMetadata.cached_time);
     } catch (e) {
         console.error("Error saving photo metadata to local storage:", e);
@@ -97,7 +70,7 @@ async function loadPhotoMetadata() {
 }
 
 
-
+// --- REWRITTEN: Function to fetch metadata and pre-load images into browser's HTTP cache ---
 async function fetchAndCacheNewPhoto(forceFetch = false) {
     if (isFetchingPhoto) {
         console.log("A photo fetch is already in progress. Not initiating duplicate fetch.");
@@ -134,7 +107,7 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
         }
 
         const apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(photoQuery)}&orientation=${photoOrientation}`;
-        const apiResponse = await fetch(apiUrl, {
+        const apiResponse = await fetchWithRetry(apiUrl, {
             headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
         });
 
@@ -155,42 +128,30 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
         const highResImageUrl = getWebpUrl(photoMetadata.urls.full);
         const lowResImageUrl = getWebpUrl(photoMetadata.urls.thumb);
 
-        // Fetch both image responses
-        const [highResImageResponse, lowResImageResponse] = await Promise.all([
-            fetchWithRetry(highResImageUrl),
-            fetchWithRetry(lowResImageUrl)
-        ]);
-
-        if (!highResImageResponse || !highResImageResponse.ok) {
-            console.error("Could not fetch the high-resolution image. Aborting cache update.");
-            return;
+        // --- FIXED: Pre-load images into the browser's HTTP cache using fetch ---
+        // By fetching the images, we ask the browser to cache them based on their
+        // HTTP headers. We don't need to read the response body.
+        const preloadPromises = [];
+        if (lowResImageUrl) {
+            await preloadPromises.push(fetchWithRetry(lowResImageUrl).catch(e => console.warn(`Preload failed for ${lowResImageUrl}`, e.message)));
+        }
+        if (highResImageUrl) {
+            // This is a "fire and forget" to warm the browser cache.
+            await preloadPromises.push(fetchWithRetry(highResImageUrl).catch(e => console.warn(`Preload failed for ${highResImageUrl}`, e.message)));
         }
 
-        // --- NEW: Extract the actual MIME type from the response headers ---
-        const highResMimeType = highResImageResponse.headers.get('Content-Type') || 'image/webp';
-        const lowResMimeType = (lowResImageResponse && lowResImageResponse.ok) ? (lowResImageResponse.headers.get('Content-Type') || 'image/webp') : null;
-
-        // Cache the responses directly in the Cache API
-        const cache = await caches.open(IMAGE_CACHE_NAME);
-        await cache.put(highResImageUrl, highResImageResponse.clone());
-        if (lowResImageResponse && lowResImageResponse.ok) {
-            await cache.put(lowResImageUrl, lowResImageResponse.clone());
-        }
-
-        // Update the in-memory metadata cache, now including the MIME types
+        // Update the in-memory metadata cache
         currentCachedPhotoMetadata = {
             photo: photoMetadata,
             highResUrl: highResImageUrl,
-            lowResUrl: (lowResImageResponse && lowResImageResponse.ok) ? lowResImageUrl : null,
-            highResMimeType: highResMimeType, // Add MIME type
-            lowResMimeType: lowResMimeType,   // Add MIME type
+            lowResUrl: lowResImageUrl,
             is_used: false,
             cached_time: Date.now(),
             error: null
         };
-        console.log("New photo fetched and responses stored in Cache API. Marked as UNUSED.");
+        console.log("New photo metadata fetched and images are pre-loading into browser cache. Marked as UNUSED.");
 
-        await savePhotoData(); // Save the new metadata (including MIME types) to local storage
+        await savePhotoData(); // Save the new metadata to local storage
 
     } catch (error) {
         console.error("General error during photo pre-fetch process:", error);
@@ -242,7 +203,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 
-// --- MODIFIED: Listen for messages from newtab.js ---
+// --- REWRITTEN: Listen for messages from newtab.js and send back metadata only ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getUnsplashPhoto") {
         (async () => {
@@ -254,36 +215,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                  await fetchAndCacheNewPhoto(true);
             }
 
-            // Now, we destructure the new MIME type properties as well
-            const { photo, highResUrl, lowResUrl, highResMimeType, lowResMimeType, error } = currentCachedPhotoMetadata;
+            // We only need to send the metadata now. The newtab script will use the URLs directly.
+            const { photo, highResUrl, lowResUrl, error } = currentCachedPhotoMetadata;
 
             if (error || !photo) {
                 sendResponse({ error: error || "Photo data is not available." });
                 return;
             }
-
-            // ... (Getting responses from cache is unchanged) ...
-            const cache = await caches.open(IMAGE_CACHE_NAME);
-            const highResCachedResponse = await cache.match(highResUrl);
-            const lowResCachedResponse = lowResUrl ? await cache.match(lowResUrl) : null;
             
-            if (!highResCachedResponse) {
-                console.error("High-res image not found in cache! Re-fetching.");
-                await fetchAndCacheNewPhoto(true);
-                sendResponse({ error: "Image not found in cache, please reopen the tab." });
-                return;
-            }
-            
-            const highResArrayBuffer = await highResCachedResponse.arrayBuffer();
-            const lowResArrayBuffer = lowResCachedResponse ? await lowResCachedResponse.arrayBuffer() : null;
-            
-            // Prepare data to send, now including the MIME types
+            // Prepare data to send. No more ArrayBuffers or MIME types.
             const responseData = {
-                photo: photo,
-                highResArrayBuffer: highResArrayBuffer,
-                lowResArrayBuffer: lowResArrayBuffer,
-                highResMimeType: highResMimeType, // Send MIME type
-                lowResMimeType: lowResMimeType,   // Send MIME type
+                photo,
+                highResUrl,
+                lowResUrl,
             };
 
             sendResponse(responseData);
@@ -291,7 +235,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // After serving, mark as used and trigger a pre-fetch for the next tab.
             currentCachedPhotoMetadata.is_used = true;
             await savePhotoData();
-            console.log("Served photo marked as used. Triggering pre-fetch for next tab...");
+            console.log("Served photo metadata. Marked as used. Triggering pre-fetch for next tab...");
             
             fetchAndCacheNewPhoto(false);
             scheduleCacheRefreshAlarm();
@@ -300,3 +244,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 });
+''
