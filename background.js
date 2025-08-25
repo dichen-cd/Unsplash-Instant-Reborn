@@ -97,7 +97,12 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
             console.log(`Cached photo is used AND stale. Proceeding to fetch new.`);
         }
 
-        const { unsplashApiKey, photoQuery = 'nature', photoOrientation = 'landscape' } = await chrome.storage.sync.get(['unsplashApiKey', 'photoQuery', 'photoOrientation']);
+        const { unsplashApiKey, topics, photoOrientation = 'landscape' } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
+        let topicsToChooseFrom = (topics || 'nature,travel,street-photography').split(',').filter(t => t);
+        if (topicsToChooseFrom.length === 0) {
+            topicsToChooseFrom = ['nature', 'travel', 'street-photography'];
+        }
+        const randomTopic = topicsToChooseFrom[Math.floor(Math.random() * topicsToChooseFrom.length)];
 
         if (!unsplashApiKey) {
             console.error("Unsplash API Key not found.");
@@ -106,7 +111,7 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
             return;
         }
 
-        const apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(photoQuery)}&orientation=${photoOrientation}`;
+        const apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
         const apiResponse = await fetchWithRetry(apiUrl, {
             headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
         });

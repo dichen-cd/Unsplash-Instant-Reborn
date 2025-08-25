@@ -76,6 +76,27 @@
             margin-top: -10px;
             margin-bottom: 20px;
         }
+        .topics-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .topic-item {
+            display: flex;
+            align-items: center;
+        }
+        .topic-item input[type="checkbox"] {
+            width: auto;
+            margin: 0 8px 0 0;
+        }
+        .topic-item label {
+            font-weight: normal;
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -89,6 +110,12 @@
         <label for="cacheDuration">Image Cache Duration (minutes):</label>
         <input type="number" id="cacheDuration" min="1" value="5" placeholder="e.g., 5">
         <p class="note">Sets how long an image is cached before a new one is fetched (minimum 1 minute).</p>
+
+        <label>Photo Topics:</label>
+        <div id="topicsContainer" class="topics-container">
+            <!-- Checkboxes will be dynamically inserted here -->
+        </div>
+        <p class="note">Select one or more topics for the photos. If none are selected, it will default to Nature, Travel, and Street Photography.</p>
 
         <button id="saveButton">Save Settings</button>
 
