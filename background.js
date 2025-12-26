@@ -98,9 +98,9 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
         }
 
         const { unsplashApiKey, topics, photoOrientation = 'landscape' } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
-        let topicsToChooseFrom = (topics || 'nature,travel,street-photography').split(',').filter(t => t);
+        let topicsToChooseFrom = (topics || '6sMVjTLSkeQ,Fzo3zuOHN6w,bo8jQKTaE0Y').split(',').filter(t => t);
         if (topicsToChooseFrom.length === 0) {
-            topicsToChooseFrom = ['nature', 'travel', 'street-photography'];
+            topicsToChooseFrom = ['6sMVjTLSkeQ', 'Fzo3zuOHN6w', 'bo8jQKTaE0Y'];
         }
         const randomTopic = topicsToChooseFrom[Math.floor(Math.random() * topicsToChooseFrom.length)];
 
@@ -111,7 +111,8 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
             return;
         }
 
-        const apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
+        // const apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
+        const apiUrl = `https://api.unsplash.com/photos/random?topics=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
         const apiResponse = await fetchWithRetry(apiUrl, {
             headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
         });

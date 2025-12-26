@@ -1,15 +1,21 @@
 // options.js
 
 const ALL_TOPICS = [
-    { id: 'wallpapers', name: 'Wallpapers' },
-    { id: 'nature', name: 'Nature' },
-    { id: '3d-renders', name: '3D Renders' },
-    { id: 'textures-patterns', name: 'Textures & Patterns' },
-    { id: 'travel', name: 'Travel' },
-    { id: 'film', name: 'Film' },
-    { id: 'people', name: 'People' },
-    { id: 'architecture-interior', name: 'Architecture & Interior' },
-    { id: 'street-photography', name: 'Street Photography' },
+    { id: 'Jpg6Kidl-Hk', name: 'Animals' },
+    { id: 'M8jVbLbTRws', name: 'Architecture & Interiors' },
+    { id: 'aeu6rL-j6ew', name: 'Business & Work' },
+    { id: 'BJJMtteDJA4', name: 'Current Events' },
+    { id: 'qPYsDzvJOYc', name: 'Experimental' },
+    { id: 'hmenvQhUmxM', name: 'Film' },
+    { id: 'xjPR4hlkBGA', name: 'Food & Drink' },
+    { id: '_hb-dl4Q-4U', name: 'Health & Wellness' },
+    { id: '6sMVjTLSkeQ', name: 'Nature' },
+    { id: 'towJZFskpGg', name: 'People' },
+    { id: '_8zFHuhRhyo', name: 'Spirituality' },
+    { id: 'J9yrPaHXRQY', name: 'Technology' },
+    { id: 'iUIsnVtjB0Y', name: 'Textures' },
+    { id: 'Fzo3zuOHN6w', name: 'Travel' },
+    { id: 'bo8jQKTaE0Y', name: 'Wallpapers' },
 ];
 
 function populateTopics() {
@@ -48,7 +54,7 @@ async function restoreOptions() {
     const defaultSettings = {
         unsplashApiKey: '',
         cacheDuration: 5, // Default value for cache duration
-        topics: 'nature,travel,street-photography' // Default topics
+        topics: '6sMVjTLSkeQ,Fzo3zuOHN6w,bo8jQKTaE0Y' // Default topics
     };
 
     chrome.storage.sync.get(defaultSettings, (items) => {
