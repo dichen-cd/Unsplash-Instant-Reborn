@@ -239,7 +239,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse(responseData);
 
             // After serving, mark as used and trigger a pre-fetch for the next tab.
-            currentCachedPhotoMetadata.is_used = true;
+            // If this is the first time the photo is being used, update the cached_time to now.
+            if (!currentCachedPhotoMetadata.is_used) {
+                currentCachedPhotoMetadata.cached_time = Date.now();
+                currentCachedPhotoMetadata.is_used = true;
+            }
+
             await savePhotoData();
             console.log("Served photo metadata. Marked as used. Triggering pre-fetch for next tab...");
             
