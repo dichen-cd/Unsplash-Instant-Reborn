@@ -3,122 +3,326 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unsplash Instant Reborn Options</title>
+    <title>Unsplash Instant Reborn - Settings</title>
     <style>
+        :root {
+            --primary-color: #000000;
+            --accent-color: #3498db;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-main: #2c3e50;
+            --text-secondary: #6c757d;
+            --border-color: #e9ecef;
+            --success-bg: #d4edda;
+            --success-text: #155724;
+            --error-bg: #f8d7da;
+            --error-text: #721c24;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+            --shadow-sm: 0 2px 8px rgba(0,0,0,0.05);
+            --shadow-md: 0 8px 24px rgba(0,0,0,0.1);
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f4f4f4;
-            color: #333;
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            box-sizing: border-box;
         }
+
         .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            background-color: var(--card-bg);
+            width: 100%;
+            max-width: 680px;
+            padding: 40px;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
         }
-        h1 {
-            color: #2c3e50;
-            margin-bottom: 25px;
+
+        header {
             text-align: center;
+            margin-bottom: 40px;
         }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 10px 0;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin: 0;
+        }
+
+        section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        /* Input Group Styling */
+        .input-group {
+            margin-bottom: 20px;
+        }
+
         label {
             display: block;
             margin-bottom: 8px;
-            font-weight: bold;
+            font-weight: 500;
+            font-size: 14px;
         }
+
         input[type="text"],
         input[type="number"] {
-            width: calc(100% - 20px);
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 16px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background-color: #fff;
+            color: var(--text-main);
+            transition: border-color 0.2s, box-shadow 0.2s;
             box-sizing: border-box;
+            outline: none;
         }
-        button {
-            background-color: #3498db;
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            border-color: var(--primary-color);
+        }
+
+        .note {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .note a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .note a:hover {
+            text-decoration: underline;
+        }
+
+        /* Modern Checkbox/Topics Styling */
+        .topics-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        /* We target the specific structure created by options.js */
+        /* It creates: <div class="topic-item"><input><label></div> */
+        .topic-item {
+            position: relative;
+        }
+
+        .topic-item input[type="checkbox"] {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            height: 0;
+            width: 0;
+        }
+
+        .topic-item label {
+            display: inline-block;
+            padding: 8px 16px;
+            background-color: #f1f3f5;
+            border: 2px solid transparent;
+            border-radius: 20px;
+            font-size: 14px;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+            margin-bottom: 0; /* Override generic label margin */
+        }
+
+        .topic-item input[type="checkbox"]:checked + label {
+            background-color: var(--primary-color);
+            color: #fff;
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .topic-item input[type="checkbox"]:focus + label {
+            box-shadow: 0 0 0 3px rgba(0,0,0,0.1);
+        }
+        
+        .topic-item label:hover {
+            background-color: #e9ecef;
+        }
+        
+        .topic-item input[type="checkbox"]:checked + label:hover {
+            background-color: #333;
+            border-color: #333;
+        }
+
+        /* Button Styling */
+        button#saveButton {
+            background-color: var(--primary-color);
             color: white;
-            padding: 12px 20px;
+            padding: 16px;
             border: none;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             cursor: pointer;
             font-size: 16px;
+            font-weight: 600;
             width: 100%;
-            transition: background-color 0.2s ease;
+            margin-top: 10px;
+            transition: transform 0.1s, opacity 0.2s;
         }
-        button:hover {
-            background-color: #2980b9;
+
+        button#saveButton:hover {
+            opacity: 0.9;
         }
+
+        button#saveButton:active {
+            transform: scale(0.98);
+        }
+
+        /* Status Messages */
         #status {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 4px;
+            margin-top: 25px;
+            padding: 12px;
+            border-radius: var(--radius-sm);
             text-align: center;
-            font-weight: bold;
-            display: none; /* Hidden by default */
+            font-size: 14px;
+            font-weight: 500;
+            display: none;
+            animation: fadeIn 0.3s ease-in-out;
         }
+
         .status-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background-color: var(--success-bg);
+            color: var(--success-text);
         }
+
         .status-error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background-color: var(--error-bg);
+            color: var(--error-text);
         }
-        .note {
-            font-size: 0.9em;
-            color: #666;
-            margin-top: -10px;
-            margin-bottom: 20px;
+
+        /* Help Box Styling */
+        .help-box {
+            background-color: #f8f9fa;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 15px;
+            margin-top: 15px;
+            font-size: 13px;
         }
-        .topics-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 10px;
-            margin-bottom: 15px;
-            padding: 10px;
-            border: 1px solid #ddd;
+
+        .help-title {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-main);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .help-box ol {
+            margin: 0;
+            padding-left: 20px;
+            color: var(--text-secondary);
+        }
+
+        .help-box li {
+            margin-bottom: 5px;
+        }
+
+        .help-box b {
+            color: var(--text-main);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Scrollbar aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ccc;
             border-radius: 4px;
         }
-        .topic-item {
-            display: flex;
-            align-items: center;
-        }
-        .topic-item input[type="checkbox"] {
-            width: auto;
-            margin: 0 8px 0 0;
-        }
-        .topic-item label {
-            font-weight: normal;
-            margin-bottom: 0;
+        ::-webkit-scrollbar-thumb:hover {
+            background: #bbb;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Unsplash Instant Reborn Options</h1>
+        <header>
+            <h1>Unsplash Instant</h1>
+            <p class="subtitle">Customize your new tab experience</p>
+        </header>
 
-        <label for="unsplashApiKey">Unsplash API Key:</label>
-        <input type="text" id="unsplashApiKey" placeholder="Your Unsplash API Key (Required)">
-        <p class="note">Get your API key by creating an app on <a href="https://unsplash.com/developers" target="_blank">Unsplash Developers</a>.</p>
+        <section>
+            <span class="section-title">General Settings</span>
+            
+            <div class="input-group">
+                <label for="unsplashApiKey">Unsplash API Key</label>
+                <input type="text" id="unsplashApiKey" placeholder="e.g. your_access_key_here">
+                <p class="note">
+                    Required to fetch images. <a href="https://unsplash.com/developers" target="_blank">Unsplash Developers &rarr;</a>
+                </p>
+                <div class="help-box">
+                    <span class="help-title">How to get your key:</span>
+                    <ol>
+                        <li>Log in to <a href="https://unsplash.com/developers" target="_blank">Unsplash Developers</a>. and click <b>"Your apps"</b></li>
+                        <li>Click <b>"New Application"</b> and accept the terms.</li>
+                        <li>Give your app a name (e.g., "My Tab") and create it.</li>
+                        <li>Scroll to the "Keys" section and copy the <b>Access Key</b>.</li>
+                    </ol>
+                </div>
+            </div>
 
-        <label for="cacheDuration">Image Cache Duration (minutes):</label>
-        <input type="number" id="cacheDuration" min="1" value="5" placeholder="e.g., 5">
-        <p class="note">Sets how long an image is cached before a new one is fetched (minimum 1 minute).</p>
+            <div class="input-group">
+                <label for="cacheDuration">Cache Frequency (Minutes)</label>
+                <input type="number" id="cacheDuration" min="1" value="5" placeholder="5">
+                <p class="note">How often to fetch a new background image.</p>
+            </div>
+        </section>
 
-        <label>Photo Topics:</label>
-        <div id="topicsContainer" class="topics-container">
-            <!-- Checkboxes will be dynamically inserted here -->
-        </div>
-        <p class="note">Select one or more topics for the photos. If none are selected, it will default to Nature, Travel, and Street Photography.</p>
+        <section>
+            <span class="section-title">Interests</span>
+            <p class="note" style="margin-bottom: 15px;">Select topics you love. We'll curate photos based on your selection.</p>
+            <div id="topicsContainer" class="topics-container">
+                <!-- Checkboxes injected by JS -->
+            </div>
+        </section>
 
-        <button id="saveButton">Save Settings</button>
-
+        <button id="saveButton">Save Changes</button>
         <div id="status"></div>
     </div>
 

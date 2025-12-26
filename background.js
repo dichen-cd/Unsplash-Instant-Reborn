@@ -199,9 +199,9 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.runtime.onInstalled.addListener(async (details) => {
     console.log(`Extension installed/updated (reason: ${details.reason}).`);
-    // Check if the reason is 'install' (first time installation)
-    if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
-        console.log("Extension installed for the first time. Opening options page.");
+    // Check if the reason is 'install' (first time installation) or 'update'
+    if (details.reason === chrome.runtime.OnInstalledReason.INSTALL || details.reason === chrome.runtime.OnInstalledReason.UPDATE) {
+        console.log("Extension installed or updated. Opening options page.");
         chrome.runtime.openOptionsPage(); // Open the options page
     }
     await fetchAndCacheNewPhoto(true);
