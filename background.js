@@ -1,8 +1,5 @@
 // background.js
 
-// --- REMOVED: Cache Name is no longer needed ---
-// const IMAGE_CACHE_NAME = 'unsplash-image-cache-v1';
-
 // --- New: Flag to prevent duplicate photo fetch processes ---
 let isFetchingPhoto = false;
 
@@ -12,7 +9,7 @@ async function fetchWithRetry(url, options, retries = 3, retryDelay = 1000) {
     for (let i = 0; i < retries; i++) {
         try {
             const response = await fetch(url, options);
-            return response; // Success (even with HTTP error), return response
+            return response; 
         } catch (error) {
             lastError = error;
             console.warn(`Fetch attempt ${i + 1} of ${retries} for "${url}" failed: ${error.message}`);
@@ -21,238 +18,189 @@ async function fetchWithRetry(url, options, retries = 3, retryDelay = 1000) {
             }
         }
     }
-    console.error(`All ${retries} fetch attempts for "${url}" failed.`);
-    throw lastError; // All retries failed, throw the last captured error.
+    throw lastError;
 }
 
 // Global in-memory cache for the last fetched photo data
 let currentCachedPhotoMetadata = {
     photo: null,
-    highResUrl: null,       // URL for the high-resolution image
-    lowResUrl: null,        // URL for the low-resolution image
+    highResUrl: null,
+    optimizedThumbUrl: null,
+    thumbDataUri: null,
     is_used: false,
     cached_time: 0,
     error: null
 };
 
-
-// --- HELPER FUNCTION TO GET WEBP URL ---
-function getWebpUrl(originalUrl) {
-    if (!originalUrl) return '';
-    return `${originalUrl}&fm=webp`;
+// --- Convert Blob to Data URI for instant loading ---
+async function blobToDataUri(blob) {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 8192;
+    for (let i = 0; i < bytes.byteLength; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return `data:${blob.type};base64,${btoa(binary)}`;
 }
 
-// --- MODIFIED: Function to save photo data (metadata only) ---
+// Save photo data to SESSION storage (RAM) for speed, and LOCAL for persistence
 async function savePhotoData() {
     try {
-        // Save metadata to chrome.storage.local
-        await chrome.storage.local.set({ 'cachedUnsplashPhoto': currentCachedPhotoMetadata });
-        console.log("Photo metadata saved to local storage with is_used:", currentCachedPhotoMetadata.is_used, "and time:", currentCachedPhotoMetadata.cached_time);
+        // High-speed session storage for the heavy Data URI
+        await chrome.storage.session.set({ 'cachedUnsplashPhoto': currentCachedPhotoMetadata });
+        // Local storage for metadata persistence (without the heavy Data URI to save space)
+        const persistentMetadata = { ...currentCachedPhotoMetadata, thumbDataUri: null };
+        await chrome.storage.local.set({ 'cachedUnsplashMetadata': persistentMetadata });
     } catch (e) {
-        console.error("Error saving photo metadata to local storage:", e);
+        console.error("Error saving photo data:", e);
     }
 }
 
-// --- MODIFIED: Function to load photo metadata from local storage ---
+// Load photo metadata
 async function loadPhotoMetadata() {
     try {
-        const result = await chrome.storage.local.get('cachedUnsplashPhoto');
-        if (result.cachedUnsplashPhoto && result.cachedUnsplashPhoto.photo) {
-            currentCachedPhotoMetadata = result.cachedUnsplashPhoto;
-            console.log("Photo metadata loaded from local storage with is_used:", currentCachedPhotoMetadata.is_used, "and time:", currentCachedPhotoMetadata.cached_time);
+        const sessionResult = await chrome.storage.session.get('cachedUnsplashPhoto');
+        if (sessionResult.cachedUnsplashPhoto && sessionResult.cachedUnsplashPhoto.photo) {
+            currentCachedPhotoMetadata = sessionResult.cachedUnsplashPhoto;
+            return true;
+        }
+        const localResult = await chrome.storage.local.get('cachedUnsplashMetadata');
+        if (localResult.cachedUnsplashMetadata && localResult.cachedUnsplashMetadata.photo) {
+            currentCachedPhotoMetadata = localResult.cachedUnsplashMetadata;
             return true;
         }
         return false;
     } catch (e) {
-        console.error("Error loading photo metadata from local storage:", e);
+        console.error("Error loading photo metadata:", e);
         return false;
     }
 }
 
-
-// --- REWRITTEN: Function to fetch metadata and pre-load images into browser's HTTP cache ---
+// Fetch metadata and pre-load images
 async function fetchAndCacheNewPhoto(forceFetch = false) {
-    if (isFetchingPhoto) {
-        console.log("A photo fetch is already in progress. Not initiating duplicate fetch.");
-        return;
-    }
+    if (isFetchingPhoto) return;
     isFetchingPhoto = true;
 
     try {
         if (!forceFetch) {
             const preferences = await chrome.storage.sync.get('cacheDuration');
-            const cacheDurationMinutes = preferences.cacheDuration || 5;
-            const cacheDurationMs = cacheDurationMinutes * 60 * 1000;
+            const cacheDurationMs = (preferences.cacheDuration || 5) * 60 * 1000;
             const now = Date.now();
             const photoIsStale = (currentCachedPhotoMetadata.cached_time + cacheDurationMs) < now;
 
-            if (!currentCachedPhotoMetadata.is_used) {
-                console.log("Cached photo is unused. Not fetching new.");
+            if (!currentCachedPhotoMetadata.is_used || !photoIsStale) {
                 return;
             }
-            if (!photoIsStale) {
-                console.log(`Cached photo is used but still fresh. Not fetching new.`);
-                return;
-            }
-            console.log(`Cached photo is used AND stale. Proceeding to fetch new.`);
         }
 
         const { unsplashApiKey, topics, photoOrientation = 'landscape' } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
-        let topicsToChooseFrom = (topics || '6sMVjTLSkeQ,Fzo3zuOHN6w,bo8jQKTaE0Y').split(',').filter(t => t);
-        if (topicsToChooseFrom.length === 0) {
-            topicsToChooseFrom = ['6sMVjTLSkeQ', 'Fzo3zuOHN6w', 'bo8jQKTaE0Y'];
-        }
-        const randomTopic = topicsToChooseFrom[Math.floor(Math.random() * topicsToChooseFrom.length)];
-
         if (!unsplashApiKey) {
-            console.error("Unsplash API Key not found.");
-            currentCachedPhotoMetadata = { photo: null, highResUrl: null, lowResUrl: null, is_used: false, cached_time: 0, error: "API Key not set. Please set it in extension options." };
+            currentCachedPhotoMetadata.error = "API Key not set.";
             await savePhotoData();
             return;
         }
 
-        // const apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
+        // Get screen dimensions saved by newtab.js
+        const dims = await chrome.storage.local.get(['screenWidth', 'devicePixelRatio']);
+        const width = dims.screenWidth || 1920;
+        const dpr = dims.devicePixelRatio || 1;
+        const optimizedWidth = Math.min(Math.round(width * dpr * 1.1), 3840);
+
+        let topicsList = (topics || '6sMVjTLSkeQ,Fzo3zuOHN6w,bo8jQKTaE0Y').split(',').filter(t => t);
+        const randomTopic = topicsList[Math.floor(Math.random() * topicsList.length)];
         const apiUrl = `https://api.unsplash.com/photos/random?topics=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
+
         const apiResponse = await fetchWithRetry(apiUrl, {
             headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
         });
 
         if (!apiResponse.ok) {
-             const errorText = await apiResponse.text();
-             let errorMsg = `Failed to pre-fetch: ${apiResponse.status}`;
-             if (apiResponse.status === 401) errorMsg = "Invalid Unsplash API Key.";
-             if (apiResponse.status === 403) errorMsg = "Unsplash API Rate Limit Exceeded.";
-             console.error(`Unsplash API error: ${apiResponse.status} - ${errorText}`);
-             currentCachedPhotoMetadata = { photo: null, highResUrl: null, lowResUrl: null, is_used: false, cached_time: 0, error: errorMsg };
+             currentCachedPhotoMetadata.error = `API Error: ${apiResponse.status}`;
              await savePhotoData();
              return;
         }
 
         const photoMetadata = await apiResponse.json();
+        
+        // Strategy: 
+        // 1. highResUrl = original raw/full for progressive swap
+        // 2. optimizedThumbUrl = q=70, auto=format, tailored width for instant paint
+        const highResUrl = `${photoMetadata.urls.raw}&auto=format&q=80`;
+        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=70`;
 
-        // Determine image URLs for download
-        const highResImageUrl = getWebpUrl(photoMetadata.urls.full);
-        const lowResImageUrl = getWebpUrl(photoMetadata.urls.thumb);
+        let thumbDataUri = null;
+        try {
+            const thumbResponse = await fetchWithRetry(optimizedThumbUrl);
+            if (thumbResponse.ok) {
+                const blob = await thumbResponse.blob();
+                thumbDataUri = await blobToDataUri(blob);
+            }
+        } catch (e) { console.warn("Optimized thumb download failed", e); }
 
-        // --- FIXED: Pre-load images into the browser's HTTP cache using fetch ---
-        // By fetching the images, we ask the browser to cache them based on their
-        // HTTP headers. We don't need to read the response body.
-        const preloadPromises = [];
-        if (lowResImageUrl) {
-            await preloadPromises.push(fetchWithRetry(lowResImageUrl).catch(e => console.warn(`Preload failed for ${lowResImageUrl}`, e.message)));
+        // Pre-warm the browser cache for the high-res image
+        if (highResUrl) {
+            fetchWithRetry(highResUrl).catch(() => {});
         }
-        if (highResImageUrl) {
-            // This is a "fire and forget" to warm the browser cache.
-            await preloadPromises.push(fetchWithRetry(highResImageUrl).catch(e => console.warn(`Preload failed for ${highResImageUrl}`, e.message)));
-        }
 
-        // Update the in-memory metadata cache
         currentCachedPhotoMetadata = {
             photo: photoMetadata,
-            highResUrl: highResImageUrl,
-            lowResUrl: lowResImageUrl,
+            highResUrl: highResUrl,
+            optimizedThumbUrl: optimizedThumbUrl,
+            thumbDataUri: thumbDataUri,
             is_used: false,
             cached_time: Date.now(),
             error: null
         };
-        console.log("New photo metadata fetched and images are pre-loading into browser cache. Marked as UNUSED.");
 
-        await savePhotoData(); // Save the new metadata to local storage
-
-    } catch (error) {
-        console.error("General error during photo pre-fetch process:", error);
-        currentCachedPhotoMetadata = { photo: null, highResUrl: null, lowResUrl: null, is_used: false, cached_time: 0, error: `General error: ${error.message}` };
         await savePhotoData();
+    } catch (error) {
+        console.error("Fetch process failed:", error);
     } finally {
         isFetchingPhoto = false;
     }
 }
 
-
-// --- CHROME ALARMS FOR PROACTIVE CACHING ---
 const CACHE_REFRESH_ALARM = 'cacheRefreshAlarm';
 async function scheduleCacheRefreshAlarm() {
     const { cacheDuration = 5 } = await chrome.storage.sync.get('cacheDuration');
     chrome.alarms.clear(CACHE_REFRESH_ALARM);
     chrome.alarms.create(CACHE_REFRESH_ALARM, { periodInMinutes: cacheDuration });
-    console.log(`Scheduled cache refresh alarm for every ${cacheDuration} minutes.`);
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === CACHE_REFRESH_ALARM) {
-        console.log("Cache refresh alarm triggered.");
-        fetchAndCacheNewPhoto(false);
-    }
+    if (alarm.name === CACHE_REFRESH_ALARM) fetchAndCacheNewPhoto(false);
 });
 
-
-// Event Listeners for startup and installation
 chrome.runtime.onStartup.addListener(async () => {
-    console.log("Background script started (onStartup).");
     await loadPhotoMetadata();
     await scheduleCacheRefreshAlarm();
-    if (!currentCachedPhotoMetadata.photo || currentCachedPhotoMetadata.error) {
-        console.log("No valid photo metadata on startup, forcing a new fetch.");
-        fetchAndCacheNewPhoto(true);
-    }
+    if (!currentCachedPhotoMetadata.photo) fetchAndCacheNewPhoto(true);
 });
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-    console.log(`Extension installed/updated (reason: ${details.reason}).`);
-    // Check if the reason is 'install' (first time installation) or 'update'
-    if (details.reason === chrome.runtime.OnInstalledReason.INSTALL || details.reason === chrome.runtime.OnInstalledReason.UPDATE) {
-        console.log("Extension installed or updated. Opening options page.");
-        chrome.runtime.openOptionsPage(); // Open the options page
+    if (details.reason === 'install' || details.reason === 'update') {
+        chrome.runtime.openOptionsPage();
     }
     await fetchAndCacheNewPhoto(true);
     await scheduleCacheRefreshAlarm();
 });
 
-
-// --- REWRITTEN: Listen for messages from newtab.js and send back metadata only ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getUnsplashPhoto") {
         (async () => {
-            if (!currentCachedPhotoMetadata.photo) {
-                await loadPhotoMetadata();
-            }
+            if (!currentCachedPhotoMetadata.photo) await loadPhotoMetadata();
+            if (!currentCachedPhotoMetadata.photo) await fetchAndCacheNewPhoto(true);
 
-            if (!currentCachedPhotoMetadata.photo) {
-                 await fetchAndCacheNewPhoto(true);
-            }
+            sendResponse(currentCachedPhotoMetadata);
 
-            // We only need to send the metadata now. The newtab script will use the URLs directly.
-            const { photo, highResUrl, lowResUrl, error } = currentCachedPhotoMetadata;
-
-            if (error || !photo) {
-                sendResponse({ error: error || "Photo data is not available." });
-                return;
-            }
-            
-            // Prepare data to send. No more ArrayBuffers or MIME types.
-            const responseData = {
-                photo,
-                highResUrl,
-                lowResUrl,
-            };
-
-            sendResponse(responseData);
-
-            // After serving, mark as used and trigger a pre-fetch for the next tab.
-            // If this is the first time the photo is being used, update the cached_time to now.
             if (!currentCachedPhotoMetadata.is_used) {
                 currentCachedPhotoMetadata.cached_time = Date.now();
                 currentCachedPhotoMetadata.is_used = true;
+                await savePhotoData();
+                fetchAndCacheNewPhoto(false);
             }
-
-            await savePhotoData();
-            console.log("Served photo metadata. Marked as used. Triggering pre-fetch for next tab...");
-            
-            fetchAndCacheNewPhoto(false);
-            scheduleCacheRefreshAlarm();
         })();
-
         return true;
     }
 });
-''
