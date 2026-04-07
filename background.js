@@ -111,17 +111,41 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
         const randomTopic = topicsList[Math.floor(Math.random() * topicsList.length)];
         const apiUrl = `https://api.unsplash.com/photos/random?topics=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
 
-        const apiResponse = await fetchWithRetry(apiUrl, {
-            headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
-        });
+        let photoMetadata = null;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 3;
 
-        if (!apiResponse.ok) {
-             currentCachedPhotoMetadata.error = `API Error: ${apiResponse.status}`;
-             await savePhotoData();
-             return;
+        while (attempts < MAX_ATTEMPTS) {
+            attempts++;
+            const apiResponse = await fetchWithRetry(apiUrl, {
+                headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
+            });
+
+            if (!apiResponse.ok) {
+                 currentCachedPhotoMetadata.error = `API Error: ${apiResponse.status}`;
+                 await savePhotoData();
+                 return;
+            }
+
+            photoMetadata = await apiResponse.json();
+            
+            // Check for "Complete" EXIF: Camera, Shutter, Aperture, ISO
+            const exif = photoMetadata.exif;
+            const isComplete = exif && 
+                               (exif.make || exif.model) && 
+                               exif.exposure_time && 
+                               exif.aperture && 
+                               exif.iso;
+
+            if (isComplete) {
+                console.log(`Found photo with complete EXIF on attempt ${attempts}`);
+                break;
+            } else if (attempts < MAX_ATTEMPTS) {
+                console.warn(`Attempt ${attempts}: Photo missing EXIF, retrying...`);
+            } else {
+                console.warn(`Attempt ${attempts}: Max retries reached, using photo with partial EXIF.`);
+            }
         }
-
-        const photoMetadata = await apiResponse.json();
         
         // Strategy: 
         // 1. highResUrl = original raw/full for progressive swap
