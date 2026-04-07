@@ -94,7 +94,7 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
             }
         }
 
-        const { unsplashApiKey, topics, photoOrientation = 'landscape' } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
+        const { unsplashApiKey, topics = 'EDITOR_CHOICE', photoOrientation = 'landscape' } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
         if (!unsplashApiKey) {
             currentCachedPhotoMetadata.error = "API Key not set.";
             await savePhotoData();
@@ -107,9 +107,15 @@ async function fetchAndCacheNewPhoto(forceFetch = false) {
         const dpr = dims.devicePixelRatio || 1;
         const optimizedWidth = Math.min(Math.round(width * dpr * 1.1), 3840);
 
-        let topicsList = (topics || '6sMVjTLSkeQ,Fzo3zuOHN6w,bo8jQKTaE0Y').split(',').filter(t => t);
+        let topicsList = topics.split(',').filter(t => t);
         const randomTopic = topicsList[Math.floor(Math.random() * topicsList.length)];
-        const apiUrl = `https://api.unsplash.com/photos/random?topics=${encodeURIComponent(randomTopic)}&orientation=${photoOrientation}`;
+        
+        let apiUrl = `https://api.unsplash.com/photos/random?orientation=${photoOrientation}`;
+        if (randomTopic === 'EDITOR_CHOICE') {
+            apiUrl += `&collections=317099`;
+        } else {
+            apiUrl += `&topics=${encodeURIComponent(randomTopic)}`;
+        }
 
         let photoMetadata = null;
         let attempts = 0;

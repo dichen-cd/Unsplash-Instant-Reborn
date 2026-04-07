@@ -1,6 +1,7 @@
 // options.js
 
 const ALL_TOPICS = [
+    { id: 'EDITOR_CHOICE', name: "Editor's Choice" },
     { id: 'Jpg6Kidl-Hk', name: 'Animals' },
     { id: 'M8jVbLbTRws', name: 'Architecture & Interiors' },
     { id: 'aeu6rL-j6ew', name: 'Business & Work' },
@@ -54,7 +55,7 @@ async function restoreOptions() {
     const defaultSettings = {
         unsplashApiKey: '',
         cacheDuration: 5, // Default value for cache duration
-        topics: '6sMVjTLSkeQ,Fzo3zuOHN6w,bo8jQKTaE0Y' // Default topics
+        topics: 'EDITOR_CHOICE' // Default topics
     };
 
     chrome.storage.sync.get(defaultSettings, (items) => {
