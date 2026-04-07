@@ -10,7 +10,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const backgroundPhoto = document.getElementById('background-photo');
     const photoAnchor = document.getElementById('photo-anchor');
     const unsplashLogoLink = document.getElementById('unsplash-logo-link');
-    const downloadLink = document.getElementById('download-link');
+    
+    const historyButton = document.getElementById('history-button');
+    const historyPanel = document.getElementById('history-panel');
+    const closeHistory = document.getElementById('close-history');
+    const historyItemsContainer = document.getElementById('history-items');
 
     const photographerProfileLink = document.getElementById('photographer-profile-link');
     const photographerAvatar = document.getElementById('photographer-avatar');
@@ -100,10 +104,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const userProfileUrl = `${photo.user.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
         const photoPageUrl = `${photo.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
-        const downloadPhotoUrl = `${photo.links.download}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
 
         if (unsplashLogoLink) unsplashLogoLink.href = photoPageUrl;
-        if (downloadLink) downloadLink.href = downloadPhotoUrl;
+        
+        // Add to history
+        addToHistory({
+            id: photo.id,
+            thumb: photo.urls.thumb,
+            url: photoPageUrl,
+            photographer: photo.user.name,
+            timestamp: Date.now()
+        });
+
         if (photographerProfileLink) photographerProfileLink.href = userProfileUrl;
         if (photographerAvatar) {
             photographerAvatar.src = photo.user.profile_image.medium;
@@ -153,6 +165,88 @@ document.addEventListener('DOMContentLoaded', async () => {
             bottomRightExif.classList.toggle('loaded', hasExifData);
         }
     }
+
+    async function addToHistory(photoMetadata) {
+        try {
+            const result = await chrome.storage.local.get('photoHistory');
+            let history = result.photoHistory || [];
+            
+            // Remove if already exists (bring to top)
+            history = history.filter(item => item.id !== photoMetadata.id);
+            
+            // Add to top
+            history.unshift(photoMetadata);
+            
+            // Limit to 20
+            history = history.slice(0, 20);
+            
+            await chrome.storage.local.set({ photoHistory: history });
+        } catch (e) {
+            console.error("Failed to update history", e);
+        }
+    }
+
+    async function renderHistory() {
+        if (!historyItemsContainer) return;
+        
+        try {
+            const result = await chrome.storage.local.get('photoHistory');
+            const history = result.photoHistory || [];
+            
+            if (history.length === 0) {
+                historyItemsContainer.innerHTML = '<p style="grid-column: span 2; text-align: center; opacity: 0.5; padding: 20px;">No history yet.</p>';
+                return;
+            }
+            
+            historyItemsContainer.innerHTML = history.map(item => `
+                <div class="history-item" data-url="${item.url}">
+                    <img src="${item.thumb}" alt="Photo by ${item.photographer}">
+                    <div class="history-info">${item.photographer}</div>
+                </div>
+            `).join('');
+            
+            // Add click listeners to history items
+            historyItemsContainer.querySelectorAll('.history-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    window.open(item.dataset.url, '_blank');
+                });
+            });
+        } catch (e) {
+            console.error("Failed to render history", e);
+        }
+    }
+
+    function toggleHistoryPanel() {
+        if (!historyPanel) return;
+        const isHidden = historyPanel.classList.contains('hidden');
+        if (isHidden) {
+            renderHistory();
+            historyPanel.classList.remove('hidden');
+        } else {
+            historyPanel.classList.add('hidden');
+        }
+    }
+
+    if (historyButton) {
+        historyButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleHistoryPanel();
+        });
+    }
+
+    if (closeHistory) {
+        closeHistory.addEventListener('click', () => {
+            historyPanel.classList.add('hidden');
+        });
+    }
+
+    // Close panel when clicking outside
+    document.addEventListener('click', (e) => {
+        if (historyPanel && !historyPanel.classList.contains('hidden') && 
+            !historyPanel.contains(e.target) && !historyButton.contains(e.target)) {
+            historyPanel.classList.add('hidden');
+        }
+    });
 
     async function fetchPhotoWithRetry(retries = 3) {
         for (let i = 0; i < retries; i++) {

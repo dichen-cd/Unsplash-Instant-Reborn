@@ -28,11 +28,20 @@
                 </a>
             </div>
             <div id="top-right-buttons">
-                <a id="download-link" href="#" class="control-button" download="" title="Download photo">
-                    <svg version="1.1" viewBox="0 0 32 32" width="16" height="16"><path d="M25.8 15.5l-7.8 7.2v-20.7h-4v20.7l-7.8-7.2-2.7 3 12.5 11.4 12.5-11.4z"></path></svg>
-                    <span>Download</span>
-                </a>
+                <button id="history-button" title="View history">
+                    <svg version="1.1" viewBox="0 0 32 32" width="32" height="32" fill="#fff">
+                        <path d="M16 2C8.27 2 2 8.27 2 16s6.27 14 14 14 14-6.27 14-14S23.73 2 16 2zm5.7 18.3l-7.7-5.4V8h4v5.3l5.7 4-2 3z"></path>
+                    </svg>
+                </button>
             </div>
+        </div>
+
+        <div id="history-panel" class="hidden">
+            <div id="history-header">
+                <h3>Recent Photos</h3>
+                <button id="close-history" class="control-button">Close</button>
+            </div>
+            <div id="history-items"></div>
         </div>
 
         <div id="bottom-section">
