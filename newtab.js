@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const unsplashLogoLink = document.getElementById('unsplash-logo-link');
     
     const historyButton = document.getElementById('history-button');
+    const refreshButton = document.getElementById('refresh-button');
     const historyPanel = document.getElementById('history-panel');
     const closeHistory = document.getElementById('close-history');
     const historyItemsContainer = document.getElementById('history-items');
@@ -78,29 +79,53 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function displayPhoto(cachedPhotoData) {
-        hideLoadingOverlay();
+    function displayPhoto(cachedPhotoData, isForced = false) {
         hideGlobalError();
 
         const { photo, highResUrl, optimizedThumbUrl, thumbDataUri } = cachedPhotoData;
 
-        if (!photo) return;
-
-        if (photoAnchor && backgroundPhoto) {
-            // Set the optimized thumb as the preview source
-            backgroundPhoto.src = thumbDataUri || optimizedThumbUrl || highResUrl;
-            
-            // Set the high-resolution source for progressive-image.js to swap in
-            photoAnchor.href = highResUrl || optimizedThumbUrl;
-            
-            backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-
-            if (topSection) topSection.classList.add('loaded');
-            if (bottomSection) bottomSection.classList.add('loaded');
+        if (!photo) {
+            hideLoadingOverlay();
+            return;
         }
 
-        // Notify background to cycle cache and pre-fetch next
-        chrome.runtime.sendMessage({ action: "getUnsplashPhoto" }).catch(() => {});
+        if (photoAnchor && backgroundPhoto) {
+            // Define the behavior for when the image is ready
+            const handleImageLoad = () => {
+                backgroundPhoto.style.opacity = '1';
+                if (topSection) topSection.classList.add('loaded');
+                if (bottomSection) bottomSection.classList.add('loaded');
+                hideLoadingOverlay();
+            };
+
+            // Prepare for the new image
+            backgroundPhoto.onload = handleImageLoad;
+
+            // If forced, clear classes to trigger re-animation
+            if (isForced) {
+                backgroundPhoto.style.opacity = '0';
+                if (topSection) topSection.classList.remove('loaded');
+                if (bottomSection) bottomSection.classList.remove('loaded');
+            }
+
+            // Set the sources
+            const newSrc = thumbDataUri || optimizedThumbUrl || highResUrl;
+            backgroundPhoto.src = newSrc;
+            photoAnchor.href = highResUrl || optimizedThumbUrl;
+            backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
+
+            // Handle the case where the image is already cached and onload might not fire
+            if (backgroundPhoto.complete) {
+                handleImageLoad();
+            }
+        } else {
+            hideLoadingOverlay();
+        }
+
+        // Notify background to cycle cache for NEXT tab
+        if (!isForced) {
+            chrome.runtime.sendMessage({ action: "getUnsplashPhoto" }).catch(() => {});
+        }
 
         const userProfileUrl = `${photo.user.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
         const photoPageUrl = `${photo.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
@@ -234,6 +259,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    if (refreshButton) {
+        refreshButton.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                showLoadingOverlay('Fetching new photo...');
+                if (historyPanel) historyPanel.classList.add('hidden');
+                
+                // Wait for background to fetch and CACHE the new photo
+                const response = await chrome.runtime.sendMessage({ action: "forceRefreshPhoto" });
+                
+                if (response && response.photo) {
+                    // Workaround: Reload the entire page to pull the now-cached fresh photo
+                    window.location.reload();
+                } else if (response && response.error) {
+                    showGlobalError(response.error);
+                }
+            } catch (error) {
+                showGlobalError("Refresh failed.");
+            }
+        });
+    }
+
     if (closeHistory) {
         closeHistory.addEventListener('click', () => {
             historyPanel.classList.add('hidden');
@@ -248,13 +295,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    async function fetchPhotoWithRetry(retries = 3) {
+    async function fetchPhotoWithRetry(retries = 3, force = false) {
         for (let i = 0; i < retries; i++) {
             try {
-                showLoadingOverlay('Loading photo...');
-                const response = await chrome.runtime.sendMessage({ action: "getUnsplashPhoto" });
+                showLoadingOverlay(force ? 'Fetching new photo...' : 'Loading photo...');
+                const action = force ? "forceRefreshPhoto" : "getUnsplashPhoto";
+                const response = await chrome.runtime.sendMessage({ action: action });
                 if (response && response.photo) {
-                    displayPhoto(response);
+                    displayPhoto(response, force);
                     return;
                 }
                 if (response && response.error) {
@@ -270,15 +318,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function init() {
         try {
             // Priority 1: High-speed session storage (thumb pixels in RAM)
-            const sessionResult = await chrome.storage.session.get('cachedUnsplashPhoto');
-            if (sessionResult.cachedUnsplashPhoto && sessionResult.cachedUnsplashPhoto.photo) {
-                displayPhoto(sessionResult.cachedUnsplashPhoto);
+            const sessionResult = await chrome.storage.session.get('activePhoto');
+            if (sessionResult.activePhoto && sessionResult.activePhoto.photo) {
+                displayPhoto(sessionResult.activePhoto, false);
                 return;
             }
             // Priority 2: Local storage (metadata persistent on disk)
-            const localResult = await chrome.storage.local.get('cachedUnsplashMetadata');
-            if (localResult.cachedUnsplashMetadata && localResult.cachedUnsplashMetadata.photo) {
-                displayPhoto(localResult.cachedUnsplashMetadata);
+            const localResult = await chrome.storage.local.get('activeMetadata');
+            if (localResult.activeMetadata && localResult.activeMetadata.photo) {
+                displayPhoto(localResult.activeMetadata, false);
                 return;
             }
         } catch (e) {}

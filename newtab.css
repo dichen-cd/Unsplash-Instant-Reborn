@@ -319,24 +319,65 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    background: rgba(255, 255, 255, 0.03);
 }
 
 #history-header h3 {
     margin: 0;
-    font-size: 15px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    opacity: 0.9;
+}
+
+#history-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+#refresh-button {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: none;
+    padding: 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+#refresh-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+#refresh-button:active {
+    transform: scale(0.95);
+}
+
+#refresh-button svg {
+    margin: 0;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#refresh-button:hover svg {
+    transform: rotate(180deg);
 }
 
 #close-history {
     background: rgba(255, 255, 255, 0.1);
     color: white;
     border: none;
-    padding: 4px 10px;
-    border-radius: 4px;
+    padding: 6px 12px;
+    border-radius: 6px;
     font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: all 0.2s ease;
 }
 
 #close-history:hover {
@@ -344,11 +385,11 @@ body {
 }
 
 #history-items {
-    padding: 15px;
+    padding: 20px;
     overflow-y: auto;
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    gap: 16px;
     max-height: 500px;
 }
 
