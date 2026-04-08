@@ -21,6 +21,14 @@ async function fetchWithRetry(url, options, retries = 3, retryDelay = 1000) {
     throw lastError;
 }
 
+function blobToDataUri(blob) {
+    return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(blob);
+    });
+}
+
 // Global in-memory cache for the photos
 let activePhoto = {
     photo: null, highResUrl: null, optimizedThumbUrl: null, thumbDataUri: null,
@@ -71,7 +79,7 @@ async function performFetch() {
 
         const dims = await chrome.storage.local.get(['screenWidth', 'devicePixelRatio']);
         const width = dims.screenWidth || 1920;
-        const dpr = dims.devicePixelRatio || 1;
+        const dpr = Math.min(dims.devicePixelRatio || 1, 1.3);
         const optimizedWidth = Math.min(Math.round(width * dpr * 1.1), 3840);
 
         let topicsList = topics.split(',').filter(t => t);
@@ -94,7 +102,7 @@ async function performFetch() {
         }
         
         const highResUrl = `${photoMetadata.urls.raw}&auto=format&q=80`;
-        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=70`;
+        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=60`;
 
         let thumbDataUri = null;
         try {
