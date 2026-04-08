@@ -1,337 +1,344 @@
 // newtab.js
 
-document.addEventListener('DOMContentLoaded', async () => {
-    // Save screen dimensions for the background pre-fetcher
-    chrome.storage.local.set({
-        screenWidth: window.screen.width,
-        devicePixelRatio: window.devicePixelRatio
+/* =====================================================================
+   Constants & Configuration
+   ===================================================================== */
+const API_URL = 'https://api.unsplash.com';
+const STORAGE_KEYS = {
+    SETTINGS: 'ui_settings',
+    CACHE: 'photo_cache',
+    HISTORY: 'photo_history',
+    PREFETCH: 'photo_prefetch',
+    ACTIVE: 'active_photo_metadata' // Persistent fallback for cold starts
+};
+
+const DEFAULTS = {
+    topics: 'EDITOR_CHOICE',
+    photoOrientation: 'landscape',
+    cacheDuration: 5 // minutes
+};
+
+/* =====================================================================
+   Storage Helpers
+   ===================================================================== */
+function storageGet(key, store = chrome.storage.local) {
+    return new Promise(resolve => {
+        store.get(key, data => resolve(data[key] ?? null));
     });
+}
 
-    const backgroundPhoto = document.getElementById('background-photo');
+function storageSet(key, value, store = chrome.storage.local) {
+    return new Promise(resolve => {
+        store.set({ [key]: value }, resolve);
+    });
+}
+
+/* =====================================================================
+   Utility Functions
+   ===================================================================== */
+async function fetchWithRetry(url, options, retries = 3, retryDelay = 1000) {
+    let lastError;
+    for (let i = 0; i < retries; i++) {
+        try {
+            const response = await fetch(url, options);
+            return response;
+        } catch (error) {
+            lastError = error;
+            if (i < retries - 1) await new Promise(res => setTimeout(res, retryDelay));
+        }
+    }
+    throw lastError;
+}
+
+function blobToDataUri(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = e => reject(e);
+        reader.readAsDataURL(blob);
+    });
+}
+
+function unsplashUrl(url) {
+    const u = new URL(url);
+    u.searchParams.set('utm_source', 'Unsplash Instant Reborn');
+    u.searchParams.set('utm_medium', 'referral');
+    return u.toString();
+}
+
+/* =====================================================================
+   Unsplash API & Photo Logic
+   ===================================================================== */
+async function performFetch() {
+    try {
+        const { unsplashApiKey, topics = DEFAULTS.topics, photoOrientation = DEFAULTS.photoOrientation } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
+        if (!unsplashApiKey) return { error: "API Key not set." };
+
+        const width = window.screen.width;
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.3);
+        const optimizedWidth = Math.min(Math.round(width * dpr * 1.1), 3840);
+
+        let topicsList = topics.split(',').filter(t => t);
+        const randomTopic = topicsList[Math.floor(Math.random() * topicsList.length)];
+        let apiUrl = `${API_URL}/photos/random?orientation=${photoOrientation}`;
+        if (randomTopic === 'EDITOR_CHOICE') apiUrl += `&collections=317099`;
+        else apiUrl += `&topics=${encodeURIComponent(randomTopic)}`;
+
+        let photoMetadata = null;
+        let attempts = 0;
+        // Retry up to 3 times for complete EXIF data
+        while (attempts < 3) {
+            attempts++;
+            const apiResponse = await fetchWithRetry(apiUrl, {
+                headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
+            });
+            if (!apiResponse.ok) return { error: `API Error: ${apiResponse.status}` };
+            photoMetadata = await apiResponse.json();
+            
+            const exif = photoMetadata.exif || {};
+            // Check for key EXIF properties
+            if ((exif.make || exif.model) && exif.exposure_time && exif.aperture && exif.iso) {
+                break;
+            }
+        }
+
+        const highResUrl = `${photoMetadata.urls.raw}&auto=format&q=80`;
+        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=60`;
+
+        return {
+            photo: photoMetadata,
+            highResUrl: highResUrl,
+            optimizedThumbUrl: optimizedThumbUrl,
+            thumbDataUri: null,
+            timestamp: Date.now()
+        };
+    } catch (error) {
+        return { error: error.message };
+    }
+}
+
+async function prefetchNextPhoto() {
+    try {
+        const queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
+        if (queue.length >= 1) return;
+
+        const data = await performFetch();
+        if (data.error) return;
+
+        // Use fetchWithRetry for the image blob as well
+        const res = await fetchWithRetry(data.optimizedThumbUrl);
+        if (res.ok) {
+            data.thumbDataUri = await blobToDataUri(await res.blob());
+        }
+
+        await storageSet(STORAGE_KEYS.PREFETCH, [...queue, data], chrome.storage.session);
+    } catch (e) {
+        console.error("Prefetch failed:", e);
+    }
+}
+
+async function resolvePhoto() {
+    const { cacheDuration = DEFAULTS.cacheDuration } = await chrome.storage.sync.get('cacheDuration');
+    const cacheDurationMs = cacheDuration * 60 * 1000;
+
+    // 1. Check current active photo in session
+    let active = await storageGet('activePhoto', chrome.storage.session);
+    if (active && (Date.now() - active.timestamp) < cacheDurationMs) {
+        return active;
+    }
+
+    // 2. Check prefetch queue
+    const queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
+    if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        await storageSet(STORAGE_KEYS.PREFETCH, rest, chrome.storage.session);
+        await storageSet('activePhoto', next, chrome.storage.session);
+        await storageSet(STORAGE_KEYS.ACTIVE, { ...next, thumbDataUri: null }); // Persist metadata only
+        return next;
+    }
+
+    // 3. Fallback to local persistent metadata
+    const persistent = await storageGet(STORAGE_KEYS.ACTIVE);
+    if (persistent && (Date.now() - persistent.timestamp) < cacheDurationMs) {
+        return persistent;
+    }
+
+    // 4. Cold start fetch
+    const fresh = await performFetch();
+    if (!fresh.error) {
+        await storageSet('activePhoto', fresh, chrome.storage.session);
+        await storageSet(STORAGE_KEYS.ACTIVE, fresh);
+    }
+    return fresh;
+}
+
+/* =====================================================================
+   UI Rendering & Events
+   ===================================================================== */
+document.addEventListener('DOMContentLoaded', async () => {
+    // DOM Elements
+    const bgEl = document.getElementById('background-photo');
     const photoAnchor = document.getElementById('photo-anchor');
-    const unsplashLogoLink = document.getElementById('unsplash-logo-link');
-    
-    const historyButton = document.getElementById('history-button');
-    const refreshButton = document.getElementById('refresh-button');
-    const historyPanel = document.getElementById('history-panel');
-    const closeHistory = document.getElementById('close-history');
-    const historyItemsContainer = document.getElementById('history-items');
-
-    const photographerProfileLink = document.getElementById('photographer-profile-link');
-    const photographerAvatar = document.getElementById('photographer-avatar');
-    const photographerNameLink = document.getElementById('photographer-name-link');
-    const photographerName = document.getElementById('photographer-name');
-    const photographerLocationLink = document.getElementById('photographer-location-link');
-    const photographerLocation = document.getElementById('photographer-location');
-
     const topSection = document.getElementById('top-section');
     const bottomSection = document.getElementById('bottom-section');
     const loadingOverlay = document.getElementById('loading-overlay');
     const loadingMainText = document.getElementById('loading-main-text');
-    const loadingSubText = document.getElementById('loading-sub-text');
-    const bottomRightExif = document.getElementById('bottom-right-exif');
-    const exifCamera = document.getElementById('exif-camera');
-    const exifShutter = document.getElementById('exif-shutter');
-    const exifAperture = document.getElementById('exif-aperture');
-    const exifIso = document.getElementById('exif-iso');
-    const exifFocalLength = document.getElementById('exif-focal-length');
+    const unsplashLogoLink = document.getElementById('unsplash-logo-link');
+    
+    // EXIF & Info Elements
+    const photographerAvatar = document.getElementById('photographer-avatar');
+    const photographerName = document.getElementById('photographer-name');
+    const photographerNameLink = document.getElementById('photographer-name-link');
+    const photographerLocation = document.getElementById('photographer-location');
+    const photographerLocationLink = document.getElementById('photographer-location-link');
+    const exifItems = {
+        camera: document.getElementById('exif-camera'),
+        shutter: document.getElementById('exif-shutter'),
+        aperture: document.getElementById('exif-aperture'),
+        iso: document.getElementById('exif-iso'),
+        focal: document.getElementById('exif-focal-length')
+    };
 
-    const errorOverlay = document.createElement('div');
-    errorOverlay.id = 'error-overlay';
-    errorOverlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; z-index: 1000; font-family: inherit; padding: 20px; box-sizing: border-box; opacity: 0; transition: opacity 0.5s ease-in-out; pointer-events: none;`;
-    errorOverlay.innerHTML = `<p style="font-size: 1.5em; font-weight: bold; margin-bottom: 20px;">Oops! Something went wrong.</p><p style="font-size: 1.1em; line-height: 1.6;">Failed to load a new Unsplash photo.</p><p style="font-size: 1.1em; line-height: 1.6; margin-top: 10px;">Please ensure your Unsplash API Key is correctly set in your <a href="chrome://extensions/?id=${chrome.runtime.id}" target="_blank" style="color: #007bff; text-decoration: underline;">extension options</a>.</p><p style="font-size: 1.1em; line-height: 1.6; margin-top: 20px;">If the key is correct, try refreshing the page or check your internet connection.</p>`;
-    document.body.appendChild(errorOverlay);
-
-    function showLoadingOverlay(mainText, subText = '') {
+    function showLoading(text) {
         if (loadingOverlay) {
-            loadingMainText.textContent = mainText;
-            loadingSubText.textContent = subText;
+            loadingMainText.textContent = text;
             loadingOverlay.classList.remove('hidden');
             loadingOverlay.style.opacity = '1';
         }
     }
 
-    function hideLoadingOverlay() {
+    function hideLoading() {
         if (loadingOverlay) {
             loadingOverlay.style.opacity = '0';
-            setTimeout(() => { loadingOverlay.classList.add('hidden'); }, 500);
+            setTimeout(() => loadingOverlay.classList.add('hidden'), 500);
         }
     }
 
-    function showGlobalError(message = "Failed to load photo.") {
-        hideLoadingOverlay();
-        if (backgroundPhoto) backgroundPhoto.style.opacity = '0';
-        if (topSection) topSection.classList.remove('loaded');
-        if (bottomSection) bottomSection.classList.remove('loaded');
-        if (errorOverlay) {
-            errorOverlay.querySelector('p:nth-child(2)').textContent = message;
-            errorOverlay.style.display = 'flex';
-            errorOverlay.style.opacity = '1';
-            errorOverlay.style.pointerEvents = 'auto';
-        }
-    }
+    function displayPhoto(data) {
+        const { photo, highResUrl, optimizedThumbUrl, thumbDataUri } = data;
+        if (!photo) return;
 
-    function hideGlobalError() {
-        if (errorOverlay) {
-            errorOverlay.style.opacity = '0';
-            errorOverlay.style.pointerEvents = 'none';
-            setTimeout(() => { errorOverlay.style.display = 'none'; }, 500);
-        }
-    }
+        // Progressive Loading
+        bgEl.onload = () => {
+            bgEl.style.opacity = '1';
+            topSection?.classList.add('loaded');
+            bottomSection?.classList.add('loaded');
+            hideLoading();
+        };
 
-    function displayPhoto(cachedPhotoData, isForced = false) {
-        hideGlobalError();
+        const displayUrl = thumbDataUri || optimizedThumbUrl || highResUrl;
+        bgEl.src = displayUrl;
+        photoAnchor.href = highResUrl || optimizedThumbUrl;
+        bgEl.alt = `Photo by ${photo.user.name}`;
 
-        const { photo, highResUrl, optimizedThumbUrl, thumbDataUri } = cachedPhotoData;
+        if (bgEl.complete) bgEl.onload();
 
-        if (!photo) {
-            hideLoadingOverlay();
-            return;
-        }
-
-        if (photoAnchor && backgroundPhoto) {
-            // Define the behavior for when the image is ready
-            const handleImageLoad = () => {
-                backgroundPhoto.style.opacity = '1';
-                if (topSection) topSection.classList.add('loaded');
-                if (bottomSection) bottomSection.classList.add('loaded');
-                hideLoadingOverlay();
-            };
-
-            // Prepare for the new image
-            backgroundPhoto.onload = handleImageLoad;
-
-            // If forced, clear classes to trigger re-animation
-            if (isForced) {
-                backgroundPhoto.style.opacity = '0';
-                if (topSection) topSection.classList.remove('loaded');
-                if (bottomSection) bottomSection.classList.remove('loaded');
-            }
-
-            // Set the sources
-            const newSrc = thumbDataUri || optimizedThumbUrl || highResUrl;
-            backgroundPhoto.src = newSrc;
-            photoAnchor.href = highResUrl || optimizedThumbUrl;
-            backgroundPhoto.alt = `Photo by ${photo.user.name || 'Unknown'}`;
-
-            // Handle the case where the image is already cached and onload might not fire
-            if (backgroundPhoto.complete) {
-                handleImageLoad();
-            }
-        } else {
-            hideLoadingOverlay();
-        }
-
-        // Notify background to cycle cache for NEXT tab
-        if (!isForced) {
-            chrome.runtime.sendMessage({ action: "getUnsplashPhoto" }).catch(() => {});
-        }
-
-        const userProfileUrl = `${photo.user.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
-        const photoPageUrl = `${photo.links.html}?utm_source=Unsplash%20Instant%20Reborn&utm_medium=referral`;
+        // Metadata Rendering
+        const profileUrl = unsplashUrl(photo.user.links.html);
+        const photoPageUrl = unsplashUrl(photo.links.html);
 
         if (unsplashLogoLink) unsplashLogoLink.href = photoPageUrl;
+        if (photographerAvatar) photographerAvatar.src = photo.user.profile_image.medium;
+        if (photographerName) photographerName.textContent = photo.user.name;
+        if (photographerNameLink) photographerNameLink.href = profileUrl;
         
-        // Add to history
+        if (photo.user.location) {
+            photographerLocation.textContent = photo.user.location;
+            photographerLocationLink.href = profileUrl;
+            photographerLocationLink.style.display = 'block';
+        } else {
+            photographerLocationLink.style.display = 'none';
+        }
+
+        // EXIF
+        const exif = photo.exif || {};
+        let hasExif = false;
+        if (exif.make || exif.model) { exifItems.camera.textContent = `${exif.make || ''} ${exif.model || ''}`.trim(); hasExif = true; }
+        if (exif.exposure_time) { exifItems.shutter.textContent = `${exif.exposure_time}s`; hasExif = true; }
+        if (exif.aperture) { exifItems.aperture.textContent = `ƒ/${exif.aperture}`; hasExif = true; }
+        if (exif.iso) { exifItems.iso.textContent = `ISO ${exif.iso}`; hasExif = true; }
+        if (exif.focal_length) { exifItems.focal.textContent = `${exif.focal_length}mm`; hasExif = true; }
+        
+        const exifContainer = document.getElementById('bottom-right-exif');
+        if (exifContainer) {
+            exifContainer.classList.toggle('hidden', !hasExif);
+            exifContainer.classList.toggle('loaded', hasExif);
+        }
+
+        // History
         addToHistory({
             id: photo.id,
             thumb: photo.urls.thumb,
-            url: photoPageUrl,
+            url: unsplashUrl(photo.links.html),
             photographer: photo.user.name,
             timestamp: Date.now()
         });
+    }
 
-        if (photographerProfileLink) photographerProfileLink.href = userProfileUrl;
-        if (photographerAvatar) {
-            photographerAvatar.src = photo.user.profile_image.medium;
-            photographerAvatar.alt = photo.user.name || 'Photographer Avatar';
-        }
-        if (photographerNameLink) {
-            photographerNameLink.href = userProfileUrl;
-            if (photographerName) photographerName.textContent = photo.user.name || 'Unknown Photographer';
-        }
-        if (photographerLocationLink && photographerLocation) {
-            if (photo.user.location) {
-                photographerLocation.textContent = photo.user.location;
-                photographerLocationLink.href = userProfileUrl;
-                photographerLocationLink.style.display = 'block';
+    async function addToHistory(item) {
+        let history = await storageGet(STORAGE_KEYS.HISTORY) || [];
+        history = [item, ...history.filter(p => p.id !== item.id)].slice(0, 20);
+        await storageSet(STORAGE_KEYS.HISTORY, history);
+    }
+
+    // Initialization
+    const data = await resolvePhoto();
+    if (data.error) {
+        hideLoading();
+        alert(data.error);
+    } else {
+        displayPhoto(data);
+        setTimeout(prefetchNextPhoto, 2000);
+    }
+
+    // Refresh Logic
+    document.getElementById('refresh-button')?.addEventListener('click', async () => {
+        showLoading("Fetching new photo...");
+        try {
+            // Force a brand new fetch
+            const fresh = await performFetch();
+            if (!fresh.error) {
+                // Wipe the prefetch queue and active cache to start fresh
+                await storageSet(STORAGE_KEYS.PREFETCH, [], chrome.storage.session);
+                await storageSet('activePhoto', fresh, chrome.storage.session);
+                await storageSet(STORAGE_KEYS.ACTIVE, fresh);
+                
+                // Refresh the tab to display the new image
+                window.location.reload();
             } else {
-                photographerLocationLink.style.display = 'none';
+                alert(fresh.error);
             }
-        }
-
-        const exif = photo.exif;
-        let hasExifData = false;
-        if (exif) {
-            if (exif.make || exif.model) {
-                exifCamera.textContent = `${exif.make || ''} ${exif.model || ''}`.trim();
-                hasExifData = true;
-            }
-            if (exif.exposure_time) {
-                exifShutter.textContent = `${exif.exposure_time}s`;
-                hasExifData = true;
-            }
-            if (exif.aperture) {
-                exifAperture.textContent = `ƒ/${exif.aperture}`;
-                hasExifData = true;
-            }
-            if (exif.iso) {
-                exifIso.textContent = `ISO ${exif.iso}`;
-                hasExifData = true;
-            }
-            if (exif.focal_length) {
-                exifFocalLength.textContent = `${exif.focal_length}mm`;
-                hasExifData = true;
-            }
-        }
-
-        if (bottomRightExif) {
-            bottomRightExif.classList.toggle('hidden', !hasExifData);
-            bottomRightExif.classList.toggle('loaded', hasExifData);
-        }
-    }
-
-    async function addToHistory(photoMetadata) {
-        try {
-            const result = await chrome.storage.local.get('photoHistory');
-            let history = result.photoHistory || [];
-            
-            // Remove if already exists (bring to top)
-            history = history.filter(item => item.id !== photoMetadata.id);
-            
-            // Add to top
-            history.unshift(photoMetadata);
-            
-            // Limit to 20
-            history = history.slice(0, 20);
-            
-            await chrome.storage.local.set({ photoHistory: history });
         } catch (e) {
-            console.error("Failed to update history", e);
-        }
-    }
-
-    async function renderHistory() {
-        if (!historyItemsContainer) return;
-        
-        try {
-            const result = await chrome.storage.local.get('photoHistory');
-            const history = result.photoHistory || [];
-            
-            if (history.length === 0) {
-                historyItemsContainer.innerHTML = '<p style="grid-column: span 2; text-align: center; opacity: 0.5; padding: 20px;">No history yet.</p>';
-                return;
-            }
-            
-            historyItemsContainer.innerHTML = history.map(item => `
-                <div class="history-item" data-url="${item.url}">
-                    <img src="${item.thumb}" alt="Photo by ${item.photographer}">
-                    <div class="history-info">${item.photographer}</div>
-                </div>
-            `).join('');
-            
-            // Add click listeners to history items
-            historyItemsContainer.querySelectorAll('.history-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    window.open(item.dataset.url, '_blank');
-                });
-            });
-        } catch (e) {
-            console.error("Failed to render history", e);
-        }
-    }
-
-    function toggleHistoryPanel() {
-        if (!historyPanel) return;
-        const isHidden = historyPanel.classList.contains('hidden');
-        if (isHidden) {
-            renderHistory();
-            historyPanel.classList.remove('hidden');
-        } else {
-            historyPanel.classList.add('hidden');
-        }
-    }
-
-    if (historyButton) {
-        historyButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleHistoryPanel();
-        });
-    }
-
-    if (refreshButton) {
-        refreshButton.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            try {
-                showLoadingOverlay('Fetching new photo...');
-                if (historyPanel) historyPanel.classList.add('hidden');
-                
-                // Wait for background to fetch and CACHE the new photo
-                const response = await chrome.runtime.sendMessage({ action: "forceRefreshPhoto" });
-                
-                if (response && response.photo) {
-                    // Workaround: Reload the entire page to pull the now-cached fresh photo
-                    window.location.reload();
-                } else if (response && response.error) {
-                    showGlobalError(response.error);
-                }
-            } catch (error) {
-                showGlobalError("Refresh failed.");
-            }
-        });
-    }
-
-    if (closeHistory) {
-        closeHistory.addEventListener('click', () => {
-            historyPanel.classList.add('hidden');
-        });
-    }
-
-    // Close panel when clicking outside
-    document.addEventListener('click', (e) => {
-        if (historyPanel && !historyPanel.classList.contains('hidden') && 
-            !historyPanel.contains(e.target) && !historyButton.contains(e.target)) {
-            historyPanel.classList.add('hidden');
+            console.error("Refresh failed:", e);
+        } finally {
+            hideLoading();
         }
     });
 
-    async function fetchPhotoWithRetry(retries = 3, force = false) {
-        for (let i = 0; i < retries; i++) {
-            try {
-                showLoadingOverlay(force ? 'Fetching new photo...' : 'Loading photo...');
-                const action = force ? "forceRefreshPhoto" : "getUnsplashPhoto";
-                const response = await chrome.runtime.sendMessage({ action: action });
-                if (response && response.photo) {
-                    displayPhoto(response, force);
-                    return;
-                }
-                if (response && response.error) {
-                    showGlobalError(response.error);
-                    return;
-                }
-            } catch (error) {
-                if (i === retries - 1) showGlobalError("Connection failed.");
-            }
+    // History Logic
+    const historyButton = document.getElementById('history-button');
+    const historyPanel = document.getElementById('history-panel');
+    const historyItemsContainer = document.getElementById('history-items');
+
+    historyButton?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const history = await storageGet(STORAGE_KEYS.HISTORY) || [];
+        historyItemsContainer.innerHTML = history.length ? history.map(item => `
+            <div class="history-item" data-url="${item.url}">
+                <img src="${item.thumb}" alt="${item.photographer}">
+                <div class="history-info">${item.photographer}</div>
+            </div>
+        `).join('') : '<p style="grid-column: span 2; text-align: center; opacity: 0.5; padding: 20px;">No history yet.</p>';
+        
+        historyItemsContainer.querySelectorAll('.history-item').forEach(el => {
+            el.addEventListener('click', () => window.open(el.dataset.url, '_blank'));
+        });
+        historyPanel?.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!historyPanel?.contains(e.target) && !historyButton?.contains(e.target)) {
+            historyPanel?.classList.add('hidden');
         }
-    }
-
-    async function init() {
-        try {
-            // Priority 1: High-speed session storage (thumb pixels in RAM)
-            const sessionResult = await chrome.storage.session.get('activePhoto');
-            if (sessionResult.activePhoto && sessionResult.activePhoto.photo) {
-                displayPhoto(sessionResult.activePhoto, false);
-                return;
-            }
-            // Priority 2: Local storage (metadata persistent on disk)
-            const localResult = await chrome.storage.local.get('activeMetadata');
-            if (localResult.activeMetadata && localResult.activeMetadata.photo) {
-                displayPhoto(localResult.activeMetadata, false);
-                return;
-            }
-        } catch (e) {}
-        fetchPhotoWithRetry();
-    }
-
-    init();
+    });
 });

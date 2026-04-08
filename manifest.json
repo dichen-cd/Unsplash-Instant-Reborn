@@ -1,11 +1,10 @@
 {
     "manifest_version": 3,
     "name": "Unsplash Instant Reborn",
-    "version": "1.7.2",
+    "version": "1.8.0",
     "description": "Transform your new tab into a gallery of stunning photography. The modern, Manifest V3 successor to Unsplash Instant.",
     "permissions": [
         "storage",
-        "alarms",
         "unlimitedStorage"
     ],
     "host_permissions": [
@@ -14,10 +13,6 @@
     ],
     "content_security_policy": {
       "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://api.unsplash.com https://images.unsplash.com https://*.unsplash.com; img-src 'self' data: https://images.unsplash.com https://*.unsplash.com;"
-    },
-    "background": {
-        "service_worker": "background.js",
-        "type": "module"
     },
     "chrome_url_overrides": {
         "newtab": "newtab.html"
