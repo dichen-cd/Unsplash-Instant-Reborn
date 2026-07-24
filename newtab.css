@@ -48,11 +48,6 @@ body {
     filter: brightness(0.8); /* Slightly dim the image for better text readability */
 }
 
-#photo-anchor img.loading {
-    filter: brightness(0.8) blur(20px); /* Apply blur and dimming when loading low-res or before high-res */
-}
-
-
 /* --- Top Section Styling --- */
 #top-section {
     position: absolute;
@@ -246,7 +241,7 @@ body {
     justify-content: center;
     align-items: center;
     text-align: center;
-    z-index: 999; /* Below error overlay (1000), above everything else */
+    z-index: 999; /* Above everything else */
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     font-size: 1.2em;
     opacity: 1; /* Initially visible for dynamic content by JS */
@@ -257,13 +252,6 @@ body {
 #loading-overlay.hidden {
     opacity: 0;
     pointer-events: none; /* Allow clicks to pass through when hidden */
-}
-
-/* The subtext for loading */
-#loading-sub-text {
-    font-size: 0.8em;
-    margin-top: 15px;
-    color: #bbb;
 }
 
 /* Optional: Simple CSS spinner */
@@ -457,25 +445,3 @@ body {
     opacity: 1;
 }
 
-/* Error Overlay (your existing error overlay styles, ensure z-index is higher) */
-#error-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.9);
-    color: #fff;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    z-index: 1000; /* Ensure this is above loading overlay */
-    font-family: inherit;
-    padding: 20px;
-    box-sizing: border-box;
-    opacity: 0;
-    transition: opacity 0.5s ease-in-out;
-    pointer-events: none;
-}

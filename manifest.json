@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Unsplash Instant Reborn",
-    "version": "1.8.0",
+    "version": "1.8.1",
     "description": "Transform your new tab into a gallery of stunning photography. The modern, Manifest V3 successor to Unsplash Instant.",
     "permissions": [
         "storage",

@@ -186,6 +186,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const unsplashLogoLink = document.getElementById('unsplash-logo-link');
     
     // EXIF & Info Elements
+    const photographerProfileLink = document.getElementById('photographer-profile-link');
     const photographerAvatar = document.getElementById('photographer-avatar');
     const photographerName = document.getElementById('photographer-name');
     const photographerNameLink = document.getElementById('photographer-name-link');
@@ -238,6 +239,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const photoPageUrl = unsplashUrl(photo.links.html);
 
         if (unsplashLogoLink) unsplashLogoLink.href = photoPageUrl;
+        if (photographerProfileLink) photographerProfileLink.href = profileUrl;
         if (photographerAvatar) photographerAvatar.src = photo.user.profile_image.medium;
         if (photographerName) photographerName.textContent = photo.user.name;
         if (photographerNameLink) photographerNameLink.href = profileUrl;
@@ -340,5 +342,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!historyPanel?.contains(e.target) && !historyButton?.contains(e.target)) {
             historyPanel?.classList.add('hidden');
         }
+    });
+
+    document.getElementById('close-history')?.addEventListener('click', () => {
+        historyPanel?.classList.add('hidden');
     });
 });
