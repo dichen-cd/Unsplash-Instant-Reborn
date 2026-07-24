@@ -18,6 +18,8 @@ const DEFAULTS = {
     cacheDuration: 5 // minutes
 };
 
+let cachedApiKey = null;
+
 /* =====================================================================
    Storage Helpers
    ===================================================================== */
@@ -71,12 +73,17 @@ function unsplashUrl(url) {
    ===================================================================== */
 async function performFetch() {
     try {
-        const { unsplashApiKey, topics = DEFAULTS.topics, photoOrientation = DEFAULTS.photoOrientation } = await chrome.storage.sync.get(['unsplashApiKey', 'topics', 'photoOrientation']);
-        if (!unsplashApiKey) return { error: "API Key not set." };
+        if (!cachedApiKey) {
+            const { unsplashApiKey } = await chrome.storage.sync.get('unsplashApiKey');
+            cachedApiKey = unsplashApiKey;
+        }
+        if (!cachedApiKey) return { error: "API Key not set." };
+
+        const { topics = DEFAULTS.topics, photoOrientation = DEFAULTS.photoOrientation } = await chrome.storage.sync.get(['topics', 'photoOrientation']);
 
         const width = window.screen.width;
         const dpr = Math.min(window.devicePixelRatio || 1, 1.3);
-        const optimizedWidth = Math.min(Math.round(width * dpr * 1.1), 3840);
+        const optimizedWidth = Math.min(Math.round(width * dpr * 1.05), 3840);
 
         let topicsList = topics.split(',').filter(t => t);
         const randomTopic = topicsList[Math.floor(Math.random() * topicsList.length)];
@@ -90,7 +97,7 @@ async function performFetch() {
         while (attempts < 3) {
             attempts++;
             const apiResponse = await fetchWithRetry(apiUrl, {
-                headers: { 'Authorization': `Client-ID ${unsplashApiKey}`, 'Accept-Version': 'v1' }
+                headers: { 'Authorization': `Client-ID ${cachedApiKey}`, 'Accept-Version': 'v1' }
             });
             if (!apiResponse.ok) return { error: `API Error: ${apiResponse.status}` };
             photoMetadata = await apiResponse.json();
@@ -102,8 +109,8 @@ async function performFetch() {
             }
         }
 
-        const highResUrl = `${photoMetadata.urls.raw}&auto=format&q=80`;
-        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=60`;
+        const highResUrl = `${photoMetadata.urls.raw}&auto=format&q=85`;
+        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=40`;
 
         return {
             photo: photoMetadata,
@@ -141,16 +148,22 @@ async function resolvePhoto() {
     const { cacheDuration = DEFAULTS.cacheDuration } = await chrome.storage.sync.get('cacheDuration');
     const cacheDurationMs = cacheDuration * 60 * 1000;
 
+    // Read all storage in parallel
+    const [active, queue, persistent] = await Promise.all([
+        storageGet('activePhoto', chrome.storage.session),
+        storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session),
+        storageGet(STORAGE_KEYS.ACTIVE)
+    ]);
+
     // 1. Check current active photo in session
-    let active = await storageGet('activePhoto', chrome.storage.session);
     if (active && (Date.now() - active.timestamp) < cacheDurationMs) {
         return active;
     }
 
     // 2. Check prefetch queue
-    const queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
-    if (queue.length > 0) {
-        const [next, ...rest] = queue;
+    const queueItems = queue || [];
+    if (queueItems.length > 0) {
+        const [next, ...rest] = queueItems;
         await storageSet(STORAGE_KEYS.PREFETCH, rest, chrome.storage.session);
         await storageSet('activePhoto', next, chrome.storage.session);
         await storageSet(STORAGE_KEYS.ACTIVE, { ...next, thumbDataUri: null }); // Persist metadata only
@@ -158,7 +171,6 @@ async function resolvePhoto() {
     }
 
     // 3. Fallback to local persistent metadata
-    const persistent = await storageGet(STORAGE_KEYS.ACTIVE);
     if (persistent && (Date.now() - persistent.timestamp) < cacheDurationMs) {
         return persistent;
     }
