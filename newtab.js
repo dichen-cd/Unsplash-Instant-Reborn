@@ -12,11 +12,49 @@ const STORAGE_KEYS = {
     ACTIVE: 'active_photo_metadata' // Persistent fallback for cold starts
 };
 
+/* ---------------------------------------------------------------------
+   Editorial pool
+   ---------------------------------------------------------------------
+   317099 is the "Unsplash Editorial" collection, owned by the official
+   `unsplash` account. It is the same id Unsplash hardcodes as
+   `editorialCollectionId` in their official iOS and Android photo-picker
+   SDKs, which is where this value originally comes from.
+
+   `/photos/random` cannot combine `collections` and `topics` in one request,
+   so the editorial option picks one of these pools per fetch. The Wallpapers
+   topic is curated by Unsplash specifically for screen-sized backgrounds.
+--------------------------------------------------------------------- */
+const EDITORIAL_ID = 'EDITORIAL';
+const LEGACY_EDITORIAL_ID = 'EDITOR_CHOICE'; // pre-rename value, still in synced settings
+const EDITORIAL_COLLECTION = '317099';
+const WALLPAPERS_TOPIC = 'bo8jQKTaE0Y';
+
 const DEFAULTS = {
-    topics: 'EDITOR_CHOICE',
+    topics: EDITORIAL_ID,
     photoOrientation: 'landscape',
-    cacheDuration: 5 // minutes
+    cacheDuration: 5, // minutes
+    imageQuality: 'balanced',
+    customWidth: 2560
 };
+
+/* Batch fetching.
+   `/photos/random` returns up to 30 photos per request and, crucially, only
+   the JSON counts against the rate limit - image files served from
+   images.unsplash.com are free. So one request buys many ranked candidates
+   for the price of one rate-limit unit. Pixels are only ever downloaded for
+   a photo we are about to show. */
+const BATCH_COUNT = 12;
+const QUEUE_LOW_WATER = 3; // refill the queue once it drops below this
+
+const QUALITY_PRESETS = {
+    balanced: { maxDpr: 1.5, maxWidth: 3840 },
+    sharp: { maxDpr: Infinity, maxWidth: 3840 },
+    maximum: { maxDpr: Infinity, maxWidth: 5120 }
+};
+
+const PREVIEW_QUALITY = 60; // sized first paint
+const FINAL_QUALITY = 85;   // sized full-quality swap
+const PLACEHOLDER_WIDTH = 32;
 
 let cachedApiKey = null;
 
@@ -71,74 +109,212 @@ function unsplashUrl(url) {
 /* =====================================================================
    Unsplash API & Photo Logic
    ===================================================================== */
+/**
+ * Resolve the target pixel width for this display, honouring the user's
+ * quality preset. Unsplash never upscales past a photo's native size, so
+ * asking for more than the screen needs only costs bandwidth.
+ */
+function resolveTargetWidth(settings) {
+    const preset = QUALITY_PRESETS[settings.imageQuality];
+    const screenWidth = window.screen.width || 1920;
+    const rawDpr = window.devicePixelRatio || 1;
+
+    if (!preset) {
+        // 'custom': an explicit width ceiling, still bounded by real device pixels.
+        const custom = Math.min(Math.max(settings.customWidth || DEFAULTS.customWidth, 640), 7680);
+        return Math.min(Math.round(screenWidth * rawDpr), custom);
+    }
+
+    const dpr = Math.min(rawDpr, preset.maxDpr);
+    return Math.min(Math.round(screenWidth * dpr), preset.maxWidth);
+}
+
+/**
+ * Build the three-tier image ladder for a photo.
+ * Every tier is width-capped: requesting `raw` without a `w` param pulls the
+ * full master file, which Unsplash explicitly advises against.
+ */
+function buildImageUrls(photo, targetWidth) {
+    const raw = photo.urls.raw;
+    const sized = (w, q) => `${raw}&w=${w}&auto=format&fit=max&q=${q}`;
+    return {
+        placeholderUrl: sized(PLACEHOLDER_WIDTH, 40),
+        previewUrl: sized(targetWidth, PREVIEW_QUALITY),
+        highResUrl: sized(targetWidth, FINAL_QUALITY)
+    };
+}
+
+/**
+ * Score a candidate on how well it works as a background for this screen.
+ * Resolution and aspect fit dominate; EXIF completeness is a smaller bonus
+ * because the UI surfaces camera info.
+ */
+function scoreCandidate(photo, targetWidth, viewportAspect) {
+    if (!photo || !photo.urls || !photo.urls.raw || !photo.width || !photo.height) return -Infinity;
+
+    // Resolution: reward covering the target width, with diminishing returns
+    // past it. Penalise photos that would need upscaling.
+    const coverage = photo.width / targetWidth;
+    const resolutionScore = coverage >= 1
+        ? 1 + Math.min(coverage - 1, 1) * 0.15
+        : coverage * coverage; // quadratic penalty below target
+
+    // Aspect fit: how much cropping to fill the viewport. 1 is a perfect match.
+    const photoAspect = photo.width / photo.height;
+    const aspectScore = Math.min(photoAspect, viewportAspect) / Math.max(photoAspect, viewportAspect);
+
+    const exif = photo.exif || {};
+    const exifFields = [exif.make || exif.model, exif.exposure_time, exif.aperture, exif.iso];
+    const exifScore = exifFields.filter(Boolean).length / exifFields.length;
+
+    return resolutionScore * 3 + aspectScore * 2 + exifScore * 0.5;
+}
+
+/** Strip a photo record down to the fields the UI actually reads. */
+function trimPhoto(photo) {
+    return {
+        id: photo.id,
+        width: photo.width,
+        height: photo.height,
+        blur_hash: photo.blur_hash,
+        color: photo.color,
+        urls: { raw: photo.urls.raw, thumb: photo.urls.thumb },
+        links: { html: photo.links?.html },
+        exif: photo.exif || {},
+        user: {
+            name: photo.user?.name,
+            location: photo.user?.location,
+            links: { html: photo.user?.links?.html },
+            profile_image: { medium: photo.user?.profile_image?.medium }
+        }
+    };
+}
+
+/**
+ * One API request, many ranked candidates.
+ * Returns entries sorted best-first. Only metadata is fetched here - no pixels.
+ */
+async function fetchCandidates() {
+    if (!cachedApiKey) {
+        const { unsplashApiKey } = await chrome.storage.sync.get('unsplashApiKey');
+        cachedApiKey = unsplashApiKey;
+    }
+    if (!cachedApiKey) return { error: "API Key not set." };
+
+    const settings = await chrome.storage.sync.get([
+        'topics', 'photoOrientation', 'imageQuality', 'customWidth'
+    ]);
+    const topics = settings.topics ?? DEFAULTS.topics;
+    const photoOrientation = settings.photoOrientation ?? DEFAULTS.photoOrientation;
+    const targetWidth = resolveTargetWidth({
+        imageQuality: settings.imageQuality ?? DEFAULTS.imageQuality,
+        customWidth: settings.customWidth ?? DEFAULTS.customWidth
+    });
+
+    const topicsList = topics.split(',').filter(t => t);
+    const chosen = topicsList.length
+        ? topicsList[Math.floor(Math.random() * topicsList.length)]
+        : DEFAULTS.topics;
+
+    let apiUrl = `${API_URL}/photos/random?orientation=${photoOrientation}&count=${BATCH_COUNT}`;
+    if (chosen === EDITORIAL_ID || chosen === LEGACY_EDITORIAL_ID) {
+        // Blend the official editorial collection with the Wallpapers topic.
+        // These cannot be combined in a single request, so alternate randomly.
+        if (Math.random() < 0.5) apiUrl += `&collections=${EDITORIAL_COLLECTION}`;
+        else apiUrl += `&topics=${WALLPAPERS_TOPIC}`;
+    } else {
+        apiUrl += `&topics=${encodeURIComponent(chosen)}`;
+    }
+
+    const apiResponse = await fetchWithRetry(apiUrl, {
+        headers: { 'Authorization': `Client-ID ${cachedApiKey}`, 'Accept-Version': 'v1' }
+    });
+    if (!apiResponse.ok) return { error: `API Error: ${apiResponse.status}` };
+
+    // With `count` present the API always returns an array, even for count=1.
+    const payload = await apiResponse.json();
+    const photos = Array.isArray(payload) ? payload : [payload];
+
+    const viewportAspect = (window.innerWidth || window.screen.width || 1920) /
+                           (window.innerHeight || window.screen.height || 1080);
+
+    const ranked = photos
+        .filter(p => p && p.urls && p.urls.raw)
+        .map(photo => ({ photo, score: scoreCandidate(photo, targetWidth, viewportAspect) }))
+        .filter(entry => entry.score > -Infinity)
+        .sort((a, b) => b.score - a.score)
+        .map(({ photo }) => {
+            const trimmed = trimPhoto(photo);
+            return {
+                photo: trimmed,
+                ...buildImageUrls(trimmed, targetWidth),
+                targetWidth,
+                thumbDataUri: null,
+                timestamp: Date.now()
+            };
+        });
+
+    if (!ranked.length) return { error: 'No usable photos returned.' };
+    return { candidates: ranked };
+}
+
+/**
+ * Fetch a single photo, ready to display. Also banks the runners-up as
+ * metadata so later tabs cost no API calls.
+ */
 async function performFetch() {
     try {
-        if (!cachedApiKey) {
-            const { unsplashApiKey } = await chrome.storage.sync.get('unsplashApiKey');
-            cachedApiKey = unsplashApiKey;
+        const { candidates, error } = await fetchCandidates();
+        if (error) return { error };
+
+        const [best, ...rest] = candidates;
+        if (rest.length) {
+            const queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
+            await storageSet(STORAGE_KEYS.PREFETCH, [...queue, ...rest], chrome.storage.session);
         }
-        if (!cachedApiKey) return { error: "API Key not set." };
-
-        const { topics = DEFAULTS.topics, photoOrientation = DEFAULTS.photoOrientation } = await chrome.storage.sync.get(['topics', 'photoOrientation']);
-
-        const width = window.screen.width;
-        const dpr = Math.min(window.devicePixelRatio || 1, 1.3);
-        const optimizedWidth = Math.min(Math.round(width * dpr * 1.05), 3840);
-
-        let topicsList = topics.split(',').filter(t => t);
-        const randomTopic = topicsList[Math.floor(Math.random() * topicsList.length)];
-        let apiUrl = `${API_URL}/photos/random?orientation=${photoOrientation}`;
-        if (randomTopic === 'EDITOR_CHOICE') apiUrl += `&collections=317099`;
-        else apiUrl += `&topics=${encodeURIComponent(randomTopic)}`;
-
-        let photoMetadata = null;
-        let attempts = 0;
-        // Retry up to 3 times for complete EXIF data
-        while (attempts < 3) {
-            attempts++;
-            const apiResponse = await fetchWithRetry(apiUrl, {
-                headers: { 'Authorization': `Client-ID ${cachedApiKey}`, 'Accept-Version': 'v1' }
-            });
-            if (!apiResponse.ok) return { error: `API Error: ${apiResponse.status}` };
-            photoMetadata = await apiResponse.json();
-            
-            const exif = photoMetadata.exif || {};
-            // Check for key EXIF properties
-            if ((exif.make || exif.model) && exif.exposure_time && exif.aperture && exif.iso) {
-                break;
-            }
-        }
-
-        const highResUrl = `${photoMetadata.urls.raw}&auto=format&q=85`;
-        const optimizedThumbUrl = `${photoMetadata.urls.raw}&w=${optimizedWidth}&auto=format&fit=max&q=40`;
-
-        return {
-            photo: photoMetadata,
-            highResUrl: highResUrl,
-            optimizedThumbUrl: optimizedThumbUrl,
-            thumbDataUri: null,
-            timestamp: Date.now()
-        };
+        return best;
     } catch (error) {
         return { error: error.message };
     }
 }
 
+/**
+ * Off-critical-path queue maintenance. Runs after the current photo has
+ * painted, so it never delays a new tab.
+ *
+ * Two jobs:
+ *  1. Refill the queue with metadata when it runs low (one API call).
+ *  2. Warm the next entry by decoding its preview into a data URI, so the
+ *     following tab paints with no network at all.
+ */
 async function prefetchNextPhoto() {
     try {
-        const queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
-        if (queue.length >= 1) return;
+        let queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
 
-        const data = await performFetch();
-        if (data.error) return;
-
-        // Use fetchWithRetry for the image blob as well
-        const res = await fetchWithRetry(data.optimizedThumbUrl);
-        if (res.ok) {
-            data.thumbDataUri = await blobToDataUri(await res.blob());
+        // 1. Top up metadata if we're running dry.
+        if (queue.length < QUEUE_LOW_WATER) {
+            const { candidates, error } = await fetchCandidates();
+            if (!error && candidates) {
+                queue = [...queue, ...candidates];
+                await storageSet(STORAGE_KEYS.PREFETCH, queue, chrome.storage.session);
+            }
         }
 
-        await storageSet(STORAGE_KEYS.PREFETCH, [...queue, data], chrome.storage.session);
+        // 2. Warm only the next photo's pixels. The rest stay as metadata.
+        const next = queue[0];
+        if (next && !next.thumbDataUri) {
+            const res = await fetchWithRetry(next.previewUrl);
+            if (res.ok) {
+                next.thumbDataUri = await blobToDataUri(await res.blob());
+                // Re-read before writing: resolvePhoto may have shifted the
+                // queue while this download was in flight.
+                const current = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
+                if (current.length && current[0].photo?.id === next.photo?.id) {
+                    current[0] = next;
+                    await storageSet(STORAGE_KEYS.PREFETCH, current, chrome.storage.session);
+                }
+            }
+        }
     } catch (e) {
         console.error("Prefetch failed:", e);
     }
@@ -160,10 +336,13 @@ async function resolvePhoto() {
         return active;
     }
 
-    // 2. Check prefetch queue
+    // 2. Check prefetch queue. This is the fast path: the head entry is
+    //    already-ranked metadata, usually with its preview pre-decoded, so it
+    //    paints without touching the network.
     const queueItems = queue || [];
     if (queueItems.length > 0) {
         const [next, ...rest] = queueItems;
+        next.timestamp = Date.now(); // start the cache window at display time
         await storageSet(STORAGE_KEYS.PREFETCH, rest, chrome.storage.session);
         await storageSet('activePhoto', next, chrome.storage.session);
         await storageSet(STORAGE_KEYS.ACTIVE, { ...next, thumbDataUri: null }); // Persist metadata only
@@ -189,7 +368,8 @@ async function resolvePhoto() {
    ===================================================================== */
 document.addEventListener('DOMContentLoaded', async () => {
     // DOM Elements
-    const bgEl = document.getElementById('background-photo');
+    // Reassigned when a higher tier is cross-faded in as a new <img>.
+    let bgEl = document.getElementById('background-photo');
     const photoAnchor = document.getElementById('photo-anchor');
     const topSection = document.getElementById('top-section');
     const bottomSection = document.getElementById('bottom-section');
@@ -228,23 +408,96 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function displayPhoto(data) {
-        const { photo, highResUrl, optimizedThumbUrl, thumbDataUri } = data;
+        const { photo, highResUrl, previewUrl, placeholderUrl, thumbDataUri } = data;
         if (!photo) return;
 
-        // Progressive Loading
-        bgEl.onload = () => {
+        // Reveal the UI as soon as anything is on screen.
+        const reveal = () => {
             bgEl.style.opacity = '1';
             topSection?.classList.add('loaded');
             bottomSection?.classList.add('loaded');
             hideLoading();
         };
+        bgEl.onload = reveal;
 
-        const displayUrl = thumbDataUri || optimizedThumbUrl || highResUrl;
-        bgEl.src = displayUrl;
-        photoAnchor.href = highResUrl || optimizedThumbUrl;
+        /* Climb the image ladder here rather than delegating to the old
+           progressive-image.js helper (now removed). That helper scanned a
+           *live* collection of `.progressive.replace` elements and removed the
+           `replace` class as the first thing it did - before checking whether a
+           URL was present. Since these URLs are only known after an async
+           storage read, its window-load scan always ran too early, dropped the
+           anchor from the collection, and no later mutation could bring it
+           back. The full-resolution tier therefore never loaded.
+
+           We keep its visual behaviour though: each tier is inserted as a new
+           <img class="reveal">, which runs the `progressiveReveal` cross-fade
+           from progressive-image.css, and the outgoing image is removed on
+           `animationend`. That fade is the visible confirmation that a higher
+           tier actually landed. */
+        const swapIn = (url, { animate = true } = {}) => new Promise(resolve => {
+            if (!url) return resolve(false);
+            const img = new Image();
+            img.onerror = () => resolve(false);
+            img.onload = () => {
+                const outgoing = photoAnchor.querySelector('img');
+                if (!outgoing || !animate) {
+                    bgEl.src = url;
+                    bgEl.classList.remove('preview');
+                    reveal();
+                    return resolve(true);
+                }
+
+                // Mirror the outgoing element's identity/styling, minus the blur.
+                img.id = outgoing.id;
+                img.className = outgoing.className;
+                img.classList.remove('preview');
+                img.classList.add('reveal');
+                img.alt = outgoing.alt || '';
+                img.style.opacity = '1';
+
+                img.addEventListener('animationend', () => {
+                    img.classList.remove('reveal');
+                    if (outgoing.parentNode === photoAnchor) photoAnchor.removeChild(outgoing);
+                }, { once: true });
+
+                photoAnchor.insertBefore(img, outgoing.nextSibling);
+                // The freshly inserted node is now the live background element.
+                bgEl = img;
+                reveal();
+                resolve(true);
+                // Verifiable in DevTools: which tier is actually on screen.
+                console.debug(`[unsplash] tier loaded: ${img.naturalWidth}px`, url);
+            };
+            img.src = url;
+        });
+
+        // Set alt before the ladder starts, so each cross-faded tier inherits it.
         bgEl.alt = `Photo by ${photo.user.name}`;
+        // The image URL lives on data-href, not href, so the anchor never
+        // navigates. Clicking the background is intentionally inert; the
+        // camera button top-left opens the photo on Unsplash.
+        photoAnchor.setAttribute('data-href', highResUrl || previewUrl);
 
-        if (bgEl.complete) bgEl.onload();
+        // First paint: whatever is cheapest. A prefetched data URI is already
+        // in memory and already sized, so it needs no blur. The 32px
+        // placeholder does - CSS `.preview` blurs it to hide the upscaling.
+        // This tier is assigned directly (no cross-fade) since there is
+        // nothing on screen yet to fade from.
+        const immediate = thumbDataUri || placeholderUrl;
+        if (immediate) {
+            bgEl.classList.toggle('preview', !thumbDataUri);
+            bgEl.src = immediate;
+            if (bgEl.complete) reveal();
+        }
+
+        // Then decode the sized preview, then the full-quality image. Each tier
+        // only replaces the visible image once it has fully decoded, so there is
+        // no flash of a half-drawn photo, and each arrives with a visible fade.
+        (async () => {
+            // A prefetched data URI is already at preview quality; skip re-fetching it.
+            if (!thumbDataUri) await swapIn(previewUrl, { animate: !!immediate });
+            if (highResUrl && highResUrl !== previewUrl) await swapIn(highResUrl);
+        })();
 
         // Metadata Rendering
         const profileUrl = unsplashUrl(photo.user.links.html);
@@ -309,14 +562,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refresh-button')?.addEventListener('click', async () => {
         showLoading("Fetching new photo...");
         try {
-            // Force a brand new fetch
-            const fresh = await performFetch();
+            // Prefer an already-ranked candidate from the queue: it needs no API
+            // call and is often pre-decoded, so refresh feels instant. Only fall
+            // back to the network when the queue is empty.
+            const queue = await storageGet(STORAGE_KEYS.PREFETCH, chrome.storage.session) || [];
+            let fresh;
+            if (queue.length > 0) {
+                const [next, ...rest] = queue;
+                await storageSet(STORAGE_KEYS.PREFETCH, rest, chrome.storage.session);
+                fresh = next;
+            } else {
+                fresh = await performFetch();
+            }
+
             if (!fresh.error) {
-                // Wipe the prefetch queue and active cache to start fresh
-                await storageSet(STORAGE_KEYS.PREFETCH, [], chrome.storage.session);
+                fresh.timestamp = Date.now(); // restart the cache window
                 await storageSet('activePhoto', fresh, chrome.storage.session);
-                await storageSet(STORAGE_KEYS.ACTIVE, fresh);
-                
+                await storageSet(STORAGE_KEYS.ACTIVE, { ...fresh, thumbDataUri: null });
+
                 // Refresh the tab to display the new image
                 window.location.reload();
             } else {

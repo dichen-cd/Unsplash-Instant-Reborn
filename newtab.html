@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>New Tab</title>
     <link rel="stylesheet" href="newtab.css">
+    <!-- Supplies the .preview blur and the progressiveReveal cross-fade that
+         newtab.js applies as it climbs the image ladder. The companion
+         progressive-image.js script is intentionally absent - see newtab.js. -->
     <link rel="stylesheet" href="progressive-image.css">
-    <script src="progressive-image.js"></script>
 </head>
 <body>
 
@@ -16,7 +18,12 @@
             <p id="loading-main-text"></p>
         </div>
         
-        <a id="photo-anchor" class="progressive replace" href="#" data-sizes="100vh">
+        <!-- newtab.js loads the image ladder, cross-fading each tier in, and
+             records the full-resolution URL on data-href. There is no href, so
+             this anchor never navigates: clicking the background is inert by
+             design (also enforced by pointer-events: none). The camera button
+             below opens the photo on Unsplash. -->
+        <a id="photo-anchor" class="progressive">
             <img id="background-photo" class="preview" src="" alt="Unsplash Photo">
         </a>
 

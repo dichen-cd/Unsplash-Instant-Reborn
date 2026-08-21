@@ -90,7 +90,8 @@
         }
 
         input[type="text"],
-        input[type="number"] {
+        input[type="number"],
+        select {
             width: 100%;
             padding: 12px 16px;
             font-size: 16px;
@@ -104,7 +105,8 @@
         }
 
         input[type="text"]:focus,
-        input[type="number"]:focus {
+        input[type="number"]:focus,
+        select:focus {
             border-color: var(--primary-color);
         }
 
@@ -311,6 +313,26 @@
                 <label for="cacheDuration">Cache Frequency (Minutes)</label>
                 <input type="number" id="cacheDuration" min="1" value="5" placeholder="5">
                 <p class="note">How often to fetch a new background image.</p>
+            </div>
+
+            <div class="input-group">
+                <label for="imageQuality">Image Resolution</label>
+                <select id="imageQuality">
+                    <option value="balanced">Balanced &mdash; capped at 1.5&times; pixel density (default)</option>
+                    <option value="sharp">Sharp &mdash; full pixel density, up to 3840px</option>
+                    <option value="maximum">Maximum &mdash; full pixel density, up to 5120px</option>
+                    <option value="custom">Custom &mdash; set a maximum width</option>
+                </select>
+                <p class="note">
+                    Higher resolutions look sharper on high-density displays but use more bandwidth
+                    per tab. Balanced is a good default for most screens.
+                </p>
+            </div>
+
+            <div class="input-group" id="customWidthGroup" style="display: none;">
+                <label for="customWidth">Custom Maximum Width (pixels)</label>
+                <input type="number" id="customWidth" min="640" max="7680" step="1" value="2560" placeholder="2560">
+                <p class="note">Between 640 and 7680. Images are never upscaled beyond their original size.</p>
             </div>
         </section>
 

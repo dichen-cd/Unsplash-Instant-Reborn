@@ -1,7 +1,16 @@
 // options.js
 
+// Unsplash's own official editorial pool. 317099 is the "Unsplash Editorial"
+// collection, owned by the `unsplash` account and hardcoded as
+// `editorialCollectionId` in Unsplash's official iOS/Android photo-picker SDKs.
+// Blended with the official "Wallpapers" topic, which is curated specifically
+// for screen-sized backgrounds.
+const EDITORIAL_ID = 'EDITORIAL';
+// Legacy value for the same option, still present in existing users' synced settings.
+const LEGACY_EDITORIAL_ID = 'EDITOR_CHOICE';
+
 const ALL_TOPICS = [
-    { id: 'EDITOR_CHOICE', name: "Editor's Choice" },
+    { id: EDITORIAL_ID, name: 'Editorial & Wallpapers' },
     { id: 'Jpg6Kidl-Hk', name: 'Animals' },
     { id: 'M8jVbLbTRws', name: 'Architecture & Interiors' },
     { id: 'aeu6rL-j6ew', name: 'Business & Work' },
@@ -43,9 +52,18 @@ function populateTopics() {
     });
 }
 
+// Show the custom-width field only when the "custom" preset is selected.
+function syncCustomWidthVisibility() {
+    const select = document.getElementById('imageQuality');
+    const group = document.getElementById('customWidthGroup');
+    if (!select || !group) return;
+    group.style.display = select.value === 'custom' ? 'block' : 'none';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     populateTopics();
     restoreOptions();
+    document.getElementById('imageQuality')?.addEventListener('change', syncCustomWidthVisibility);
 });
 document.getElementById('saveButton').addEventListener('click', saveOptions);
 
@@ -55,14 +73,22 @@ async function restoreOptions() {
     const defaultSettings = {
         unsplashApiKey: '',
         cacheDuration: 5, // Default value for cache duration
-        topics: 'EDITOR_CHOICE' // Default topics
+        topics: EDITORIAL_ID, // Default topics
+        imageQuality: 'balanced',
+        customWidth: 2560
     };
 
     chrome.storage.sync.get(defaultSettings, (items) => {
         document.getElementById('unsplashApiKey').value = items.unsplashApiKey;
         document.getElementById('cacheDuration').value = items.cacheDuration;
+        document.getElementById('imageQuality').value = items.imageQuality;
+        document.getElementById('customWidth').value = items.customWidth;
+        syncCustomWidthVisibility();
 
-        const selectedTopics = items.topics ? items.topics.split(',') : [];
+        // Map the legacy EDITOR_CHOICE value onto its current id so existing
+        // installs keep their selection after the rename.
+        const selectedTopics = (items.topics ? items.topics.split(',') : [])
+            .map(id => (id === LEGACY_EDITORIAL_ID ? EDITORIAL_ID : id));
         document.querySelectorAll('#topicsContainer input[type="checkbox"]').forEach(checkbox => {
             checkbox.checked = selectedTopics.includes(checkbox.value);
         });
@@ -73,12 +99,12 @@ async function restoreOptions() {
 async function saveOptions() {
     const unsplashApiKey = document.getElementById('unsplashApiKey').value.trim();
     let cacheDuration = parseInt(document.getElementById('cacheDuration').value, 10);
+    const imageQuality = document.getElementById('imageQuality').value;
+    let customWidth = parseInt(document.getElementById('customWidth').value, 10);
 
     const selectedTopics = Array.from(document.querySelectorAll('#topicsContainer input:checked'))
                                 .map(cb => cb.value);
     const topics = selectedTopics.join(',');
-
-    const statusElement = document.getElementById('status');
 
     // Basic validation
     if (!unsplashApiKey) {
@@ -92,11 +118,21 @@ async function saveOptions() {
         showStatus('Invalid Cache Duration. Defaulting to 5 minutes.', 'error');
     }
 
+    if (isNaN(customWidth) || customWidth < 640 || customWidth > 7680) {
+        customWidth = 2560;
+        document.getElementById('customWidth').value = customWidth;
+        if (imageQuality === 'custom') {
+            showStatus('Invalid Custom Width. Defaulting to 2560px.', 'error');
+        }
+    }
+
     chrome.storage.sync.set(
         {
             unsplashApiKey: unsplashApiKey,
             cacheDuration: cacheDuration,
-            topics: topics
+            topics: topics,
+            imageQuality: imageQuality,
+            customWidth: customWidth
         },
         () => {
             // Update status to let user know options were saved.
