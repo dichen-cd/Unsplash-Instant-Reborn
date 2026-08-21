@@ -149,6 +149,20 @@ function buildImageUrls(photo, targetWidth) {
  * Resolution and aspect fit dominate; EXIF completeness is a smaller bonus
  * because the UI surfaces camera info.
  */
+/**
+ * Does this photo carry enough EXIF for the bottom-right panel to render?
+ * Mirrors exactly the fields `displayPhoto()` prints, so a candidate that
+ * passes here can never produce an empty panel.
+ */
+function hasDisplayableExif(photo) {
+    const exif = photo && photo.exif;
+    if (!exif) return false;
+    return Boolean(
+        exif.make || exif.model || exif.exposure_time ||
+        exif.aperture || exif.iso || exif.focal_length
+    );
+}
+
 function scoreCandidate(photo, targetWidth, viewportAspect) {
     if (!photo || !photo.urls || !photo.urls.raw || !photo.width || !photo.height) return -Infinity;
 
@@ -163,6 +177,8 @@ function scoreCandidate(photo, targetWidth, viewportAspect) {
     const photoAspect = photo.width / photo.height;
     const aspectScore = Math.min(photoAspect, viewportAspect) / Math.max(photoAspect, viewportAspect);
 
+    // Candidates with no EXIF at all are already filtered out upstream, so this
+    // now only breaks ties between partial and complete camera data.
     const exif = photo.exif || {};
     const exifFields = [exif.make || exif.model, exif.exposure_time, exif.aperture, exif.iso];
     const exifScore = exifFields.filter(Boolean).length / exifFields.length;
@@ -238,8 +254,19 @@ async function fetchCandidates() {
     const viewportAspect = (window.innerWidth || window.screen.width || 1920) /
                            (window.innerHeight || window.screen.height || 1080);
 
-    const ranked = photos
-        .filter(p => p && p.urls && p.urls.raw)
+    const usable = photos.filter(p => p && p.urls && p.urls.raw);
+
+    // Drop candidates with no displayable EXIF before ranking, so the camera
+    // panel is always populated. Unsplash strips EXIF from a fair number of
+    // uploads, so fall back to the unfiltered set rather than showing nothing
+    // if a whole batch comes back bare.
+    const withExif = usable.filter(hasDisplayableExif);
+    const pool = withExif.length ? withExif : usable;
+    if (!withExif.length && usable.length) {
+        console.debug('[unsplash] no candidates had EXIF; using unfiltered batch');
+    }
+
+    const ranked = pool
         .map(photo => ({ photo, score: scoreCandidate(photo, targetWidth, viewportAspect) }))
         .filter(entry => entry.score > -Infinity)
         .sort((a, b) => b.score - a.score)
